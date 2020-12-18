@@ -336,6 +336,7 @@ class MOS6502:
             self.a = new_val & 0x00FF
         else:
             self.write(self.abs_addr, new_val & 0x00FF)
+        return 0
 
     def _comp_bcc(self):
         return self._branch_if(self._get_status(Status.C) is True)
@@ -347,7 +348,12 @@ class MOS6502:
         return self._branch_if(self._get_status(Status.Z) is True)
 
     def _comp_bit(self):
-        pass
+        self.fetch()
+        new_val = self.a & self.fetched
+        self._set_status(Status.Z, (new_val & 0x00FF) == 0)
+        self._set_status(Status.N, self.fetched & (1 << 7))
+        self._set_status(Status.V, self.fetched & (1 << 6))
+        return 0
 
     def _comp_bmi(self):
         return self._branch_if(self._get_status(Status.N) is True)
