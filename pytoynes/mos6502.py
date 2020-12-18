@@ -38,6 +38,7 @@ class MOS6502:
         self.fetched = None
         self.abs_addr = 0
         self.rel_addr = 0
+        self.opcode = None
         self.status = {s: 0 for s in Status}
         self.opcode_to_instruction = {
             0x69: Instruction("ADC", self._comp_adc, self._addr_imm, 2),
@@ -325,7 +326,16 @@ class MOS6502:
         return 1
 
     def _comp_asl(self):
-        pass
+        self.fetch()
+        new_val = self.fetched << 1
+        self._set_status(Status.C, (new_val & 0xFF00) > 0)
+        self._set_status(Status.Z, (new_val & 0x00FF) == 0)
+        self._set_status(Status.N, (new_val & 0x80) > 0)
+
+        if self.opcode_to_instruction[self.opcode].address == self._addr_imp:
+            self.a = new_val & 0x00FF
+        else:
+            self.write(self.abs_addr, new_val & 0x00FF)
 
     def _comp_bcc(self):
         return self._branch_if(self._get_status(Status.C) is True)
