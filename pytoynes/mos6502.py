@@ -449,17 +449,28 @@ class MOS6502:
         self.fetch()
         self.a = self.a | self.fetched()
         self._set_status(Status.Z, (self.a & 0x00FF) == 0)
-        self._set_status(Status.N, (self.a & 0x0080) == 0)
+        self._set_status(Status.N, (self.a & 0x0080) > 0)
         return 0
 
     def _comp_inc(self):
-        pass
+        self.fetch()
+        val = self.fetched + 1
+        self._set_status(Status.Z, (val & 0x00FF) == 0)
+        self._set_status(Status.N, (val & 0x0080) > 0)
+        self.write(self.abs_addr, val)
+        return 0
 
     def _comp_inx(self):
-        pass
+        self.x += 1
+        self._set_status(Status.Z, (self.x & 0x00FF) == 0)
+        self._set_status(Status.N, (self.x & 0x0080) > 0)
+        return 0
 
     def _comp_iny(self):
-        pass
+        self.y += 1
+        self._set_status(Status.Z, (self.y & 0x00FF) == 0)
+        self._set_status(Status.N, (self.y & 0x0080) > 0)
+        return 0
 
     def _comp_jmp(self):
         pass
