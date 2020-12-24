@@ -365,7 +365,19 @@ class MOS6502:
         return self._branch_if(self._get_status(Status.N) is False)
 
     def _comp_brk(self):
-        pass
+        self.pc += 1
+        self.write(0x0100 + self.stkp, (self.pc >> 8) & 0x00FF)
+        self.stkp -= 1
+        self.write(0x0100 + self.stkp, self.pc & 0x00FF)
+        self.stkp -= 1
+        self._set_status(Status.B, True)
+        self.write(0x0100 + self.stkp, self.all_status_as_int())
+        self.stkp -= 1
+        self._set_status(Status.B, False)
+        lo = self.read(0xFFFE)
+        hi = self.read(0xFFFF)
+        self.pc = (hi << 8) | lo
+        return 0
 
     def _comp_bvc(self):
         return self._branch_if(self._get_status(Status.V) is False)
