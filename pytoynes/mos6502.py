@@ -473,10 +473,17 @@ class MOS6502:
         return 0
 
     def _comp_jmp(self):
-        pass
+        self.pc = self.abs_addr
+        return 0
 
     def _comp_jsr(self):
-        pass
+        self.pc -= 1
+        self.write(0x0100 + self.stkp, (self.pc >> 8) & 0x00FF)
+        self.stkp -= 1
+        self.write(0x0100 + self.stkp, self.pc & 0x00FF)
+        self.stkp -= 1
+        self.pc = self.abs_addr
+        return 0
 
     def _comp_lda(self):
         pass
