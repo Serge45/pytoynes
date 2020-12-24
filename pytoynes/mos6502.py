@@ -446,7 +446,11 @@ class MOS6502:
         return 0
 
     def _comp_eor(self):
-        pass
+        self.fetch()
+        self.a = self.a | self.fetched()
+        self._set_status(Status.Z, (self.a & 0x00FF) == 0)
+        self._set_status(Status.N, (self.a & 0x0080) == 0)
+        return 0
 
     def _comp_inc(self):
         pass
