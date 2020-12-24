@@ -447,7 +447,7 @@ class MOS6502:
 
     def _comp_eor(self):
         self.fetch()
-        self.a = self.a | self.fetched()
+        self.a = self.a ^ self.fetched()
         self._set_status(Status.Z, (self.a & 0x00FF) == 0)
         self._set_status(Status.N, (self.a & 0x0080) > 0)
         return 0
