@@ -402,13 +402,28 @@ class MOS6502:
         return 0
 
     def _comp_cmp(self):
-        pass
+        self.fetch()
+        val = self.a - self.fetched
+        self._set_status(Status.C, (val & 0x00FF) >= 0)
+        self._set_status(Status.Z, (val & 0x00FF) == 0)
+        self._set_status(Status.N, (val & 0x80) > 0)
+        return 0
 
     def _comp_cpx(self):
-        pass
+        self.fetch()
+        val = self.x - self.fetched
+        self._set_status(Status.C, (val & 0x00FF) >= 0)
+        self._set_status(Status.Z, (val & 0x00FF) == 0)
+        self._set_status(Status.N, (val & 0x80) > 0)
+        return 0
 
     def _comp_cpy(self):
-        pass
+        self.fetch()
+        val = self.y - self.fetched
+        self._set_status(Status.C, (val & 0x00FF) >= 0)
+        self._set_status(Status.Z, (val & 0x00FF) == 0)
+        self._set_status(Status.N, (val & 0x80) > 0)
+        return 0
 
     def _comp_dec(self):
         pass
