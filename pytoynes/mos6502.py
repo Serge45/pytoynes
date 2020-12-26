@@ -450,7 +450,7 @@ class MOS6502:
         self.a = self.a ^ self.fetched()
         self._set_status(Status.Z, (self.a & 0x00FF) == 0)
         self._set_status(Status.N, (self.a & 0x0080) > 0)
-        return 0
+        return 1
 
     def _comp_inc(self):
         self.fetch()
@@ -486,13 +486,25 @@ class MOS6502:
         return 0
 
     def _comp_lda(self):
-        pass
+        self.fetch()
+        self.a = self.fetched
+        self._set_status(Status.Z, self.a == 0)
+        self._set_status(Status.N, (self.a & 0x0080) > 0)
+        return 1
 
     def _comp_ldx(self):
-        pass
+        self.fetch()
+        self.x = self.fetched
+        self._set_status(Status.Z, self.x == 0)
+        self._set_status(Status.N, (self.x & 0x0080) > 0)
+        return 1
 
     def _comp_ldy(self):
-        pass
+        self.fetch()
+        self.y = self.fetched
+        self._set_status(Status.Z, self.y == 0)
+        self._set_status(Status.N, (self.y & 0x0080) > 0)
+        return 1
 
     def _comp_lsr(self):
         pass
