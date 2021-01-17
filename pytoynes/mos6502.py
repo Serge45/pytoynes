@@ -526,7 +526,11 @@ class MOS6502:
         return 0
 
     def _comp_ora(self):
-        pass
+        self.fetch()
+        self.a |= self.fetched
+        self._set_status(Status.Z, (self.a & 0xFF) == 0)
+        self._set_status(Status.N, (self.a & 0x80) > 0)
+        return 0
 
     def _comp_pha(self):
         pass
