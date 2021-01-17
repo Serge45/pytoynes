@@ -523,7 +523,7 @@ class MOS6502:
         return 0
 
     def _comp_nop(self):
-        pass
+        return 0
 
     def _comp_ora(self):
         pass
