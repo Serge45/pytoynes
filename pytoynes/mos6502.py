@@ -507,7 +507,20 @@ class MOS6502:
         return 1
 
     def _comp_lsr(self):
-        pass
+        self.fetch()
+        carry_flag = (self.fetched & 0x0080) > 0
+        new_val = self.fetched >> 1
+        zero_flag = (new_val & 0x00FF) == 0
+
+        self._set_status(Status.C, carry_flag)
+        self._set_status(Status.Z, zero_flag)
+
+        if self.opcode_to_instruction[self.opcode].address == self._addr_imp:
+            self.a = new_val
+        else:
+            self.write(self.abs_addr, new_val)
+
+        return 0
 
     def _comp_nop(self):
         pass
