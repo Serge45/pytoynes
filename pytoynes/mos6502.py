@@ -428,20 +428,20 @@ class MOS6502:
     def _comp_dec(self):
         self.fetch()
         val = self.fetched - 1
-        self._set_status(Status.Z, (val 0x00FF) == 0)
+        self._set_status(Status.Z, (val & 0x00FF) == 0)
         self._set_status(Status.N, (val & 0x0080) > 0)
         self.write(self.abs_addr, val & 0x00FF)
         return 0
 
     def _comp_dex(self):
         self.x -= 1
-        self._set_status(Status.Z, (self.x 0x00FF) == 0)
+        self._set_status(Status.Z, (self.x & 0x00FF) == 0)
         self._set_status(Status.N, (self.x & 0x0080) > 0)
         return 0
 
     def _comp_dey(self):
         self.y -= 1
-        self._set_status(Status.Z, (self.y 0x00FF) == 0)
+        self._set_status(Status.Z, (self.y & 0x00FF) == 0)
         self._set_status(Status.N, (self.y & 0x0080) > 0)
         return 0
 
