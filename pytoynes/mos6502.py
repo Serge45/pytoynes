@@ -217,15 +217,15 @@ class MOS6502:
         self.bus.write(addr, data)
 
     def clock(self):
-        if cycle == 0:
-            self.opcode = read(self.pc)
+        if self.cycle == 0:
+            self.opcode = self.read(self.pc)
             self.pc += 1
             ins = self.opcode_to_instruction[self.opcode]
             self.cycle += ins.num_cycles
             extra_cycle_1, extra_cycle_2 = ins.address(), ins.compute()
             self.cycle += extra_cycle_1 & extra_cycle_2
 
-        assert cycle > 0
+        assert self.cycle > 0
         self.cycle -= 1
 
     def fetch(self):
