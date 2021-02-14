@@ -538,7 +538,10 @@ class MOS6502:
         return 0
 
     def _comp_php(self):
-        pass
+        status_int = self.all_status_as_int()
+        self.write(self.stkp, status_int)
+        self.stkp -= 1
+        return 0
 
     def _comp_pla(self):
         pass
