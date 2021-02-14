@@ -533,7 +533,9 @@ class MOS6502:
         return 0
 
     def _comp_pha(self):
-        pass
+        self.write(self.stkp, self.a)
+        self.stkp -= 1
+        return 0
 
     def _comp_php(self):
         pass
