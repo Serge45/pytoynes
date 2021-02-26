@@ -547,7 +547,9 @@ class MOS6502:
         return 0
 
     def _comp_plp(self):
-        pass
+        status_int = self._pop_from_stack()
+        self.restore_all_status_from_int(status_int)
+        return 0
 
     def _comp_rol(self):
         pass
