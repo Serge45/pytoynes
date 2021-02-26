@@ -541,7 +541,10 @@ class MOS6502:
         return 0
 
     def _comp_pla(self):
-        pass
+        self.a = self._push_to_stack()
+        self._set_status(Status.Z, self.a == 0)
+        self._set_status(Status.N, (self.a & 0x80) > 0)
+        return 0
 
     def _comp_plp(self):
         pass
