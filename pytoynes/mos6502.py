@@ -255,21 +255,25 @@ class MOS6502:
 
     def _interupt_if(self, cond, dst_addr, num_cycles):
         if cond is True:
-            self.write(0x0100+self.stkp, (self.pc >> 8) & 0x00FF)
-            self.stkp -= 1
-            self.write(0x0100+self.stkp, self.pc & 0x00FF)
-            self.stkp -= 1
-
+            self._push_to_stack((self.pc >> 8) & 0x00FF)
+            self._push_to_stack(self.pc & 0x00FF)
             self._set_status(Status.B, False)
             self._set_status(Status.U, True)
             self._set_status(Status.I, True)
-            self.write(0x0100+self.stkp, self.all_status_as_int())
-            self.stkp -= 1
+            self._push_to_stack(self.all_status_as_int())
 
             self.abs_addr = dst_addr
             lo, hi = self.read(self.abs_addr), self.read(self.abs_addr+1)
             self.pc = (hi << 8) | lo
             self.cycle = num_cycles
+
+    def _push_to_stack(self, data):
+        self.write(0x0100 + self.stkp, data)
+        self.stkp -= 1
+
+    def _pop_from_stack(self):
+        self.stkp += 1
+        return self.read(0x0100 + self.stkp)
 
     def irq(self):
         self._interupt_if(self._get_status(Status.I) is True, 0xFFFE, 7)
@@ -366,13 +370,10 @@ class MOS6502:
 
     def _comp_brk(self):
         self.pc += 1
-        self.write(0x0100 + self.stkp, (self.pc >> 8) & 0x00FF)
-        self.stkp -= 1
-        self.write(0x0100 + self.stkp, self.pc & 0x00FF)
-        self.stkp -= 1
+        self._push_to_stack((self.pc >> 8) & 0x00FF)
+        self._push_to_stack(self.pc & 0x00FF)
         self._set_status(Status.B, True)
-        self.write(0x0100 + self.stkp, self.all_status_as_int())
-        self.stkp -= 1
+        self._push_to_stack(self.all_status_as_int())
         self._set_status(Status.B, False)
         lo = self.read(0xFFFE)
         hi = self.read(0xFFFF)
@@ -478,10 +479,8 @@ class MOS6502:
 
     def _comp_jsr(self):
         self.pc -= 1
-        self.write(0x0100 + self.stkp, (self.pc >> 8) & 0x00FF)
-        self.stkp -= 1
-        self.write(0x0100 + self.stkp, self.pc & 0x00FF)
-        self.stkp -= 1
+        self._push_to_stack((self.pc >> 8) & 0x00FF)
+        self._push_to_stack(self.pc & 0x00FF)
         self.pc = self.abs_addr
         return 0
 
@@ -533,14 +532,12 @@ class MOS6502:
         return 0
 
     def _comp_pha(self):
-        self.write(self.stkp, self.a)
-        self.stkp -= 1
+        self._push_to_stack(self.a)
         return 0
 
     def _comp_php(self):
         status_int = self.all_status_as_int()
-        self.write(self.stkp, status_int)
-        self.stkp -= 1
+        self._push_to_stack(status_int)
         return 0
 
     def _comp_pla(self):
@@ -556,15 +553,12 @@ class MOS6502:
         pass
 
     def _comp_rti(self):
-        self.stkp += 1
-        status_int = self.read(0x0100+self.stkp)
+        status_int = self._pop_from_stack()
         status_int &= ~Status.B
         status_int &= ~Status.U
         self.restore_all_status_from_int(status_int)
-        self.stkp += 1
-        self.pc = self.read(0x0100+self.stkp)
-        self.stkp += 1
-        self.pc |= (self.read(0x0100+self.stkp) << 8)
+        self.pc = self._pop_from_stack()
+        self.pc |= (self._pop_from_stack() << 8)
         return 0
 
     def _comp_rts(self):
