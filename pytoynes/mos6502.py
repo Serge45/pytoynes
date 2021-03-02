@@ -608,7 +608,8 @@ class MOS6502:
         return 0
 
     def _comp_sei(self):
-        pass
+        self._set_status(Status.I, True)
+        return 0
 
     def _comp_sta(self):
         pass
