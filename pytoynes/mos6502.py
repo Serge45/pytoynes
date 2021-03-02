@@ -600,7 +600,8 @@ class MOS6502:
         return 0
 
     def _comp_sec(self):
-        pass
+        self._set_status(Status.C, True)
+        return 0
 
     def _comp_sed(self):
         pass
