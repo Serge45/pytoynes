@@ -636,7 +636,10 @@ class MOS6502:
         return 0
 
     def _comp_tsx(self):
-        pass
+        self.x = self.stkp
+        self._set_status(Status.Z, self.x == 0)
+        self._set_status(Status.N, (self.x & 0x80) > 0)
+        return 0
 
     def _comp_txa(self):
         pass
