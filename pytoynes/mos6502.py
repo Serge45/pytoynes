@@ -642,7 +642,10 @@ class MOS6502:
         return 0
 
     def _comp_txa(self):
-        pass
+        self.a = self.x
+        self._set_status(Status.Z, self.a == 0)
+        self._set_status(Status.N, (self.a & 0x80) > 0)
+        return 0
 
     def _comp_txs(self):
         pass
