@@ -594,7 +594,10 @@ class MOS6502:
         return 0
 
     def _comp_rts(self):
-        pass
+        lo = self._pop_from_stack()
+        hi = self._pop_from_stack()
+        self.pc = (hi << 8) | lo
+        return 0
 
     def _comp_sec(self):
         pass
