@@ -552,7 +552,20 @@ class MOS6502:
         return 0
 
     def _comp_rol(self):
-        pass
+        self.fetch()
+        old_carry_flag = self.status[Status.C]
+        self.fetched = ((self.fetched << 1) & 0xFF) | (old_carry_flag)
+        carry_flag = ((self.fetched & 0x80) > 0)
+        self._set_status(Status.C, carry_flag)
+        self._set_status(Status.Z, (self.fetched & 0xFF) == 0)
+        self._set_status(Status.N, (self.fetched & 0x80) > 0)
+
+        if self.opcode_to_instruction[self.op].addr == self._addr_imp:
+            self.a = self.fetched
+        else:
+            self.write(self.abs_addr, self.fetched)
+
+        return 0
 
     def _comp_ror(self):
         pass
