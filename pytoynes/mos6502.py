@@ -624,10 +624,16 @@ class MOS6502:
         return 0
 
     def _comp_tax(self):
-        pass
+        self.x = self.a
+        self._set_status(Status.Z, (self.x & 0xFF) == 0)
+        self._set_status(Status.N, (self.x & 0x80) > 0)
+        return 0
 
     def _comp_tay(self):
-        pass
+        self.y = self.a
+        self._set_status(Status.Z, (self.y & 0xFF) == 0)
+        self._set_status(Status.N, (self.y & 0x80) > 0)
+        return 0
 
     def _comp_tsx(self):
         pass
