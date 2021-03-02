@@ -652,7 +652,10 @@ class MOS6502:
         return 0
 
     def _comp_tya(self):
-        pass
+        self.a = self.y
+        self._set_status(Status.Z, self.a == 0)
+        self._set_status(Status.N, (self.a & 0x80) > 0)
+        return 0
 
     def _addr_imp(self):
         self.fetched = self.a
