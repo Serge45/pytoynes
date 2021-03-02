@@ -648,7 +648,8 @@ class MOS6502:
         return 0
 
     def _comp_txs(self):
-        pass
+        self.stkp = self.x
+        return 0
 
     def _comp_tya(self):
         pass
