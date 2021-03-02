@@ -612,7 +612,8 @@ class MOS6502:
         return 0
 
     def _comp_sta(self):
-        pass
+        self.write(self.abs_addr, self.a)
+        return 0
 
     def _comp_stx(self):
         pass
