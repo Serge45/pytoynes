@@ -286,7 +286,7 @@ class MOS6502:
             self.cycle += 1
             self.abs_addr = self.pc + self.rel_addr
 
-            if (self.abs_addr & 0xFF00) != (pc & 0xFF00):
+            if (self.abs_addr & 0xFF00) != (self.pc & 0xFF00):
                 self.cycle += 1
 
             self.pc = self.abs_addr
