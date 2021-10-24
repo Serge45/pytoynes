@@ -5,7 +5,7 @@ class Bus:
         self.ram = array.array('B', bytearray(64*1024))
 
     def write(self, addr, data):
-        self.ram[addr] = data
+        self.ram[addr & 0xFFFF] = data & 0xFF
 
     def read(self, addr):
-        return self.ram[addr]
+        return self.ram[addr & 0xFFFF]

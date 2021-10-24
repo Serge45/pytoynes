@@ -2,7 +2,6 @@ from enum import IntEnum
 from typing import Callable
 from .bus import Bus
 
-
 class Instruction:
     def __init__(self,
                  name: str,
@@ -40,6 +39,10 @@ class MOS6502:
         self.rel_addr = 0
         self.opcode = None
         self.status = {s: 0 for s in Status}
+        self._set_status(Status.U, True)
+        self._set_status(Status.I, True)
+        self.jammed = False
+        self.on_opcode_loaded = None
         self.opcode_to_instruction = {
             0x69: Instruction("ADC", self._comp_adc, self._addr_imm, 2),
             0x65: Instruction("ADC", self._comp_adc, self._addr_zp0, 3),
@@ -192,7 +195,108 @@ class MOS6502:
             0x8A: Instruction("TXA", self._comp_txa, self._addr_imp, 2),
             0x9A: Instruction("TXS", self._comp_txs, self._addr_imp, 2),
             0x98: Instruction("TYA", self._comp_tya, self._addr_imp, 2),
+            0x1A: Instruction("NOP", self._comp_nop, self._addr_imp, 2),
+            0x3A: Instruction("NOP", self._comp_nop, self._addr_imp, 2),
+            0x5A: Instruction("NOP", self._comp_nop, self._addr_imp, 2),
+            0x7A: Instruction("NOP", self._comp_nop, self._addr_imp, 2),
+            0xDA: Instruction("NOP", self._comp_nop, self._addr_imp, 2),
+            0xFA: Instruction("NOP", self._comp_nop, self._addr_imp, 2),
+            0x80: Instruction("NOP", self._comp_nop, self._addr_imm, 2),
+            0x82: Instruction("NOP", self._comp_nop, self._addr_imm, 2),
+            0x89: Instruction("NOP", self._comp_nop, self._addr_imm, 2),
+            0xC2: Instruction("NOP", self._comp_nop, self._addr_imm, 2),
+            0xE2: Instruction("NOP", self._comp_nop, self._addr_imm, 2),
+            0x04: Instruction("NOP", self._comp_nop, self._addr_zp0, 3),
+            0x44: Instruction("NOP", self._comp_nop, self._addr_zp0, 3),
+            0x64: Instruction("NOP", self._comp_nop, self._addr_zp0, 3),
+            0x14: Instruction("NOP", self._comp_nop, self._addr_zpx, 4),
+            0x34: Instruction("NOP", self._comp_nop, self._addr_zpx, 4),
+            0x54: Instruction("NOP", self._comp_nop, self._addr_zpx, 4),
+            0x74: Instruction("NOP", self._comp_nop, self._addr_zpx, 4),
+            0xD4: Instruction("NOP", self._comp_nop, self._addr_zpx, 4),
+            0xF4: Instruction("NOP", self._comp_nop, self._addr_zpx, 4),
+            0x0C: Instruction("NOP", self._comp_nop, self._addr_abs, 4),
+            0x1C: Instruction("NOP", self._comp_nop, self._addr_abx, 4),
+            0x3C: Instruction("NOP", self._comp_nop, self._addr_abx, 4),
+            0x5C: Instruction("NOP", self._comp_nop, self._addr_abx, 4),
+            0x7C: Instruction("NOP", self._comp_nop, self._addr_abx, 4),
+            0xDC: Instruction("NOP", self._comp_nop, self._addr_abx, 4),
+            0xFC: Instruction("NOP", self._comp_nop, self._addr_abx, 4),
+            0xA3: Instruction("LAX", self._comp_lax, self._addr_izx, 6),
+            0xA7: Instruction("LAX", self._comp_lax, self._addr_zp0, 3),
+            0xAF: Instruction("LAX", self._comp_lax, self._addr_abs, 4),
+            0xB3: Instruction("LAX", self._comp_lax, self._addr_izy, 5),
+            0xB7: Instruction("LAX", self._comp_lax, self._addr_zpy, 4),
+            0xBF: Instruction("LAX", self._comp_lax, self._addr_aby, 4),
+            0xAB: Instruction("LXA", self._comp_nop, self._addr_imm, 2),
+            0x83: Instruction("SAX", self._comp_sax, self._addr_izx, 6),
+            0x87: Instruction("SAX", self._comp_sax, self._addr_zp0, 3),
+            0x8F: Instruction("SAX", self._comp_sax, self._addr_abs, 4),
+            0x97: Instruction("SAX", self._comp_sax, self._addr_zpy, 4),
+            0xCB: Instruction("SBX", self._comp_nop, self._addr_imm, 2),
+            0xEB: Instruction("USBC", self._comp_sbc, self._addr_imm, 2),
+            0xC3: Instruction("DCP", self._comp_dcp, self._addr_izx, 8),
+            0xC7: Instruction("DCP", self._comp_dcp, self._addr_zp0, 5),
+            0xCF: Instruction("DCP", self._comp_dcp, self._addr_abs, 6),
+            0xD3: Instruction("DCP", self._comp_dcp, self._addr_izy, 8),
+            0xD7: Instruction("DCP", self._comp_dcp, self._addr_zpx, 6),
+            0xDB: Instruction("DCP", self._comp_dcp, self._addr_aby, 7),
+            0xDF: Instruction("DCP", self._comp_dcp, self._addr_abx, 7),
+            0xE3: Instruction("ISC", self._comp_isc, self._addr_izx, 8),
+            0xE7: Instruction("ISC", self._comp_isc, self._addr_zp0, 5),
+            0xEF: Instruction("ISC", self._comp_isc, self._addr_abs, 6),
+            0xF3: Instruction("ISC", self._comp_isc, self._addr_izy, 4),
+            0xF7: Instruction("ISC", self._comp_isc, self._addr_zpx, 6),
+            0xFB: Instruction("ISC", self._comp_isc, self._addr_aby, 7),
+            0xFF: Instruction("ISC", self._comp_isc, self._addr_abx, 7),
+            0x03: Instruction("SLO", self._comp_slo, self._addr_izx, 8),
+            0x07: Instruction("SLO", self._comp_slo, self._addr_zp0, 5),
+            0x0F: Instruction("SLO", self._comp_slo, self._addr_abs, 6),
+            0x13: Instruction("SLO", self._comp_slo, self._addr_izy, 8),
+            0x17: Instruction("SLO", self._comp_slo, self._addr_zpx, 6),
+            0x1B: Instruction("SLO", self._comp_slo, self._addr_aby, 7),
+            0x1F: Instruction("SLO", self._comp_slo, self._addr_abx, 7),
+            0x0B: Instruction("ANC", self._comp_nop, self._addr_imm, 2),
+            0x2B: Instruction("ANC", self._comp_nop, self._addr_imm, 2),
+            0x23: Instruction("RLA", self._comp_rla, self._addr_izx, 8),
+            0x27: Instruction("RLA", self._comp_rla, self._addr_zp0, 5),
+            0x2F: Instruction("RLA", self._comp_rla, self._addr_abs, 6),
+            0x33: Instruction("RLA", self._comp_rla, self._addr_izy, 8),
+            0x37: Instruction("RLA", self._comp_rla, self._addr_zpx, 6),
+            0x3B: Instruction("RLA", self._comp_rla, self._addr_aby, 7),
+            0x3F: Instruction("RLA", self._comp_rla, self._addr_abx, 7),
+            0x43: Instruction("SRE", self._comp_sre, self._addr_izx, 8),
+            0x47: Instruction("SRE", self._comp_sre, self._addr_zp0, 5),
+            0x4F: Instruction("SRE", self._comp_sre, self._addr_abs, 6),
+            0x53: Instruction("SRE", self._comp_sre, self._addr_izy, 8),
+            0x57: Instruction("SRE", self._comp_sre, self._addr_zpx, 6),
+            0x5B: Instruction("SRE", self._comp_sre, self._addr_aby, 7),
+            0x5F: Instruction("SRE", self._comp_sre, self._addr_abx, 7),
+            0x63: Instruction("RRA", self._comp_rra, self._addr_izx, 8),
+            0x67: Instruction("RRA", self._comp_rra, self._addr_zp0, 5),
+            0x6F: Instruction("RRA", self._comp_rra, self._addr_abs, 6),
+            0x73: Instruction("RRA", self._comp_rra, self._addr_izy, 8),
+            0x77: Instruction("RRA", self._comp_rra, self._addr_zpx, 6),
+            0x7B: Instruction("RRA", self._comp_rra, self._addr_aby, 7),
+            0x7F: Instruction("RRA", self._comp_rra, self._addr_abx, 7),
+            0x02: Instruction("JAM", self._comp_jam, self._addr_imp, 1),
+            0x12: Instruction("JAM", self._comp_jam, self._addr_imp, 1),
+            0x22: Instruction("JAM", self._comp_jam, self._addr_imp, 1),
+            0x32: Instruction("JAM", self._comp_jam, self._addr_imp, 1),
+            0x42: Instruction("JAM", self._comp_jam, self._addr_imp, 1),
+            0x52: Instruction("JAM", self._comp_jam, self._addr_imp, 0),
+            0x62: Instruction("JAM", self._comp_jam, self._addr_imp, 0),
+            0x72: Instruction("JAM", self._comp_jam, self._addr_imp, 0),
+            0x82: Instruction("JAM", self._comp_jam, self._addr_imp, 0),
+            0x92: Instruction("JAM", self._comp_jam, self._addr_imp, 0),
+            0xB2: Instruction("JAM", self._comp_jam, self._addr_imp, 0),
+            0xC2: Instruction("JAM", self._comp_jam, self._addr_imp, 0),
+            0xD2: Instruction("JAM", self._comp_jam, self._addr_imp, 0),
+            0xE2: Instruction("JAM", self._comp_jam, self._addr_imp, 0),
+            0xF2: Instruction("JAM", self._comp_jam, self._addr_imp, 0),
         }
+
+        print(f'{len(self.opcode_to_instruction)} instructions were implemented')
 
     def all_status_as_int(self) -> int:
         result = 0
@@ -217,8 +321,15 @@ class MOS6502:
         self.bus.write(addr, data)
 
     def clock(self):
+        if self.jammed is True:
+            return
+
         if self.cycle == 0:
             self.opcode = self.read(self.pc)
+
+            if self.on_opcode_loaded:
+                self.on_opcode_loaded()
+
             self.pc += 1
             ins = self.opcode_to_instruction[self.opcode]
             self.cycle += ins.num_cycles
@@ -242,6 +353,8 @@ class MOS6502:
         for s in self.status:
             self._set_status(s, False)
 
+        self._set_status(Status.U, True)
+
         self.abs_addr = 0xFFFC
 
         lo = self.read(self.abs_addr)
@@ -252,6 +365,7 @@ class MOS6502:
         self.abs_addr = 0
         self.fetched = None
         self.cycle = 0
+        self.jammed = False
 
     def _interupt_if(self, cond, dst_addr, num_cycles):
         if cond is True:
@@ -284,7 +398,7 @@ class MOS6502:
     def _branch_if(self, cond: bool):
         if cond is True:
             self.cycle += 1
-            self.abs_addr = self.pc + self.rel_addr
+            self.abs_addr = (self.pc + self.rel_addr) & 0xFFFF
 
             if (self.abs_addr & 0xFF00) != (self.pc & 0xFF00):
                 self.cycle += 1
@@ -322,6 +436,30 @@ class MOS6502:
         self.a = added & 0x00FF
         return 1
 
+    def _comp_dcp(self):
+        self._comp_dec()
+        return self._comp_cmp()
+
+    def _comp_isc(self):
+        self._comp_inc()
+        return self._comp_sbc()
+
+    def _comp_slo(self):
+        self._comp_asl()
+        return self._comp_ora()
+
+    def _comp_rla(self):
+        self._comp_rol()
+        return self._comp_and()
+
+    def _comp_sre(self):
+        self._comp_lsr()
+        return self._comp_eor()
+
+    def _comp_rra(self):
+        self._comp_ror()
+        return self._comp_adc()
+
     def _comp_and(self):
         self.fetch()
         self.a &= self.fetched
@@ -343,10 +481,10 @@ class MOS6502:
         return 0
 
     def _comp_bcc(self):
-        return self._branch_if(self._get_status(Status.C) is True)
+        return self._branch_if(self._get_status(Status.C) is False)
 
     def _comp_bcs(self):
-        return self._branch_if(self._get_status(Status.S) is True)
+        return self._branch_if(self._get_status(Status.C) is True)
 
     def _comp_beq(self):
         return self._branch_if(self._get_status(Status.Z) is True)
@@ -405,7 +543,7 @@ class MOS6502:
     def _comp_cmp(self):
         self.fetch()
         val = self.a - self.fetched
-        self._set_status(Status.C, (val & 0x00FF) >= 0)
+        self._set_status(Status.C, self.a >= self.fetched)
         self._set_status(Status.Z, (val & 0x00FF) == 0)
         self._set_status(Status.N, (val & 0x80) > 0)
         return 0
@@ -413,7 +551,7 @@ class MOS6502:
     def _comp_cpx(self):
         self.fetch()
         val = self.x - self.fetched
-        self._set_status(Status.C, (val & 0x00FF) >= 0)
+        self._set_status(Status.C, self.x >= self.fetched)
         self._set_status(Status.Z, (val & 0x00FF) == 0)
         self._set_status(Status.N, (val & 0x80) > 0)
         return 0
@@ -421,7 +559,7 @@ class MOS6502:
     def _comp_cpy(self):
         self.fetch()
         val = self.y - self.fetched
-        self._set_status(Status.C, (val & 0x00FF) >= 0)
+        self._set_status(Status.C, self.y >= self.fetched)
         self._set_status(Status.Z, (val & 0x00FF) == 0)
         self._set_status(Status.N, (val & 0x80) > 0)
         return 0
@@ -436,26 +574,28 @@ class MOS6502:
 
     def _comp_dex(self):
         self.x -= 1
+        self.x &= 0xFF
         self._set_status(Status.Z, (self.x & 0x00FF) == 0)
         self._set_status(Status.N, (self.x & 0x0080) > 0)
         return 0
 
     def _comp_dey(self):
         self.y -= 1
+        self.y &= 0xFF
         self._set_status(Status.Z, (self.y & 0x00FF) == 0)
         self._set_status(Status.N, (self.y & 0x0080) > 0)
         return 0
 
     def _comp_eor(self):
         self.fetch()
-        self.a = self.a ^ self.fetched()
+        self.a = self.a ^ self.fetched
         self._set_status(Status.Z, (self.a & 0x00FF) == 0)
         self._set_status(Status.N, (self.a & 0x0080) > 0)
         return 1
 
     def _comp_inc(self):
         self.fetch()
-        val = self.fetched + 1
+        val = ((self.fetched + 1) & 0x00FF)
         self._set_status(Status.Z, (val & 0x00FF) == 0)
         self._set_status(Status.N, (val & 0x0080) > 0)
         self.write(self.abs_addr, val)
@@ -507,18 +647,23 @@ class MOS6502:
 
     def _comp_lsr(self):
         self.fetch()
-        carry_flag = (self.fetched & 0x0080) > 0
+        carry_flag = (self.fetched & 0x01) > 0
         new_val = self.fetched >> 1
         zero_flag = (new_val & 0x00FF) == 0
 
         self._set_status(Status.C, carry_flag)
         self._set_status(Status.Z, zero_flag)
+        self._set_status(Status.N, (new_val & 0x80) > 0)
 
         if self.opcode_to_instruction[self.opcode].address == self._addr_imp:
-            self.a = new_val
+            self.a = (new_val & 0xFF)
         else:
             self.write(self.abs_addr, new_val)
 
+        return 0
+
+    def _comp_jam(self):
+        self.jammed = True
         return 0
 
     def _comp_nop(self):
@@ -537,33 +682,41 @@ class MOS6502:
 
     def _comp_php(self):
         status_int = self.all_status_as_int()
+        status_int |= Status.U
+        status_int |= Status.B
+        
         self._push_to_stack(status_int)
+        self._set_status(Status.U, True)
+        self._set_status(Status.B, False)
         return 0
 
     def _comp_pla(self):
-        self.a = self._push_to_stack()
-        self._set_status(Status.Z, self.a == 0)
+        self.a = self._pop_from_stack()
+        self._set_status(Status.Z, (self.a & 0xFF) == 0)
         self._set_status(Status.N, (self.a & 0x80) > 0)
         return 0
 
     def _comp_plp(self):
         status_int = self._pop_from_stack()
+        current_b = self._get_status(Status.B)
         self.restore_all_status_from_int(status_int)
+        self._set_status(Status.U, True)
+        self._set_status(Status.B, current_b)
         return 0
 
     def _comp_rol(self):
         self.fetch()
         old_carry_flag = self.status[Status.C]
-        self.fetched = ((self.fetched << 1) & 0xFF) | (old_carry_flag)
-        carry_flag = ((self.fetched & 0x80) > 0)
+        self.fetched = (self.fetched << 1) | (old_carry_flag)
+        carry_flag = ((self.fetched & 0xFF00) > 0)
         self._set_status(Status.C, carry_flag)
         self._set_status(Status.Z, (self.fetched & 0xFF) == 0)
         self._set_status(Status.N, (self.fetched & 0x80) > 0)
 
-        if self.opcode_to_instruction[self.op].addr == self._addr_imp:
-            self.a = self.fetched
+        if self.opcode_to_instruction[self.opcode].address == self._addr_imp:
+            self.a = (self.fetched & 0xFF)
         else:
-            self.write(self.abs_addr, self.fetched)
+            self.write(self.abs_addr, (self.fetched & 0xFF))
 
         return 0
 
@@ -571,13 +724,14 @@ class MOS6502:
         self.fetch()
         old_carry_flag = self.status[Status.C]
         old_val = self.fetched
-        self.fetched = ((self.fetched >> 1) & 0xFF) | (int(old_carry_flag) << 7)
+        self.fetched = ((self.fetched >> 1) & 0xFF) | (
+            int(old_carry_flag) << 7)
         carry_flag = (old_val & 0x01) > 0
         self._set_status(Status.C, carry_flag)
         self._set_status(Status.Z, (self.fetched & 0xFF) == 0)
         self._set_status(Status.N, (self.fetched & 0x80) > 0)
 
-        if self.opcode_to_instruction[self.op].addr == self._addr_imp:
+        if self.opcode_to_instruction[self.opcode].address == self._addr_imp:
             self.a = self.fetched
         else:
             self.write(self.abs_addr, self.fetched)
@@ -587,7 +741,7 @@ class MOS6502:
     def _comp_rti(self):
         status_int = self._pop_from_stack()
         status_int &= ~Status.B
-        status_int &= ~Status.U
+        status_int |= Status.U
         self.restore_all_status_from_int(status_int)
         self.pc = self._pop_from_stack()
         self.pc |= (self._pop_from_stack() << 8)
@@ -597,6 +751,7 @@ class MOS6502:
         lo = self._pop_from_stack()
         hi = self._pop_from_stack()
         self.pc = (hi << 8) | lo
+        self.pc += 1
         return 0
 
     def _comp_sec(self):
@@ -657,6 +812,15 @@ class MOS6502:
         self._set_status(Status.N, (self.a & 0x80) > 0)
         return 0
 
+    def _comp_lax(self):
+        self._comp_lda()
+        return self._comp_ldx()
+
+    def _comp_sax(self):
+        m = self.x & self.a
+        self.bus.write(self.abs_addr, m)
+        return 0
+
     def _addr_imp(self):
         self.fetched = self.a
         return 0
@@ -668,19 +832,19 @@ class MOS6502:
 
     def _addr_zp0(self):
         self.abs_addr = self.read(self.pc)
-        pc += 1
+        self.pc += 1
         self.abs_addr &= 0x00FF
         return 0
 
     def _addr_zpx(self):
-        self.abs_addr = self.read(self.pc) + self.x
-        pc += 1
+        self.abs_addr = (self.read(self.pc) + self.x) & 0xFFFF
+        self.pc += 1
         self.abs_addr &= 0x00FF
         return 0
 
     def _addr_zpy(self):
         self.abs_addr = self.read(self.pc) + self.y
-        pc += 1
+        self.pc += 1
         self.abs_addr &= 0x00FF
         return 0
 
@@ -753,7 +917,7 @@ class MOS6502:
         self.pc += 1
 
         lo = self.read(ptr & 0x00FF)
-        hi = self.read((ptr+1) & 0x00FF)
+        hi = self.read((ptr + 1) & 0x00FF)
 
         self.abs_addr = (hi << 8) | lo
         self.abs_addr += self.y

@@ -43,6 +43,7 @@ class Rom:
             self.tv_system = TvSystem(flag_9 & 0x01)
             flag_10 = rom_data[cursor]
             cursor += 1
+            cursor = 16 #padding to align 16 byte
             
             if self.has_trainer:
                 self.trainer = rom_data[cursor:cursor+512]
