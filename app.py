@@ -45,11 +45,10 @@ def main():
 
         for e in events:
             if e.type == pygame.KEYDOWN:
-                if e.unicode == 'q':
-                    return
-                elif e.unicode == 'd':
+                if e.unicode == 'd':
                     print(f'0x0002: {bus.ram[0x0002]:04x}, 0x0003: {bus.ram[0x0003]:04x}')
                 elif e.unicode == 'q':
+                    cpu_running = False
                     cpu_thread.join()
                     pygame.quit()
                     return
