@@ -24,6 +24,7 @@ class UnitestRom(unittest.TestCase):
         pass
 
     def test_rom_read(self):
+        # TODO: use cartridge
         p = pathlib.Path('./pytoynes/assets/nestest.nes').absolute()
         rom = Rom(str(p))
         self.assertIsNotNone(rom.prg_rom_data)
