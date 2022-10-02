@@ -298,6 +298,10 @@ class MOS6502:
 
         print(f'{len(self.opcode_to_instruction)} instructions were implemented')
 
+    def __repr__(self):
+        op_name = self.opcode_to_instruction[self.opcode].name
+        return f'PC: {hex(self.pc).upper()}, OP: {op_name}, A: {self.a}, X: {self.x}, Y: {self.y}'
+
     def all_status_as_int(self) -> int:
         result = 0
 
@@ -818,7 +822,7 @@ class MOS6502:
 
     def _comp_sax(self):
         m = self.x & self.a
-        self.bus.write(self.abs_addr, m)
+        self.write(self.abs_addr, m)
         return 0
 
     def _addr_imp(self):
@@ -873,6 +877,7 @@ class MOS6502:
 
         self.abs_addr = (hi << 8) | lo
         self.abs_addr += self.x
+        self.abs_addr &= 0xFFFF
 
         return 0 if (self.abs_addr & 0xFF00) == (hi << 8) else 1
 
@@ -884,6 +889,7 @@ class MOS6502:
 
         self.abs_addr = (hi << 8) | lo
         self.abs_addr += self.y
+        self.abs_addr &= 0xFFFF
 
         return 0 if (self.abs_addr & 0xFF00) == (hi << 8) else 1
 
@@ -921,6 +927,7 @@ class MOS6502:
 
         self.abs_addr = (hi << 8) | lo
         self.abs_addr += self.y
+        self.abs_addr &= 0xFFFF
 
         if (self.abs_addr & 0xFF00) != (hi << 8):
             return 1

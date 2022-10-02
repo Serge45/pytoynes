@@ -1,26 +1,22 @@
-from array import array
-import os
 from threading import Thread
 import pygame
 from pytoynes.bus import Bus
 from pytoynes.rom import Rom 
 from pytoynes.mos6502 import MOS6502
+from pytoynes.cartridge import Cartridge
 from pytoynes.ui.memoryview import draw_memory_view, draw_status_bits, draw_program_counter, draw_registers
 
 def main():
     cpu = MOS6502()
     bus = Bus()
     cpu.connect(bus)
-    test_rom = Rom('./pytoynes/assets/nestest.nes')
-    program = array('B', test_rom.prg_rom_data)
-    bus.ram[0x8000:0xBFFF] = program
-    bus.ram[0xC000:0xFFFF] = program
+    cartridge = Cartridge('./pytoynes/assets/nestest.nes')
+    bus.cartridge = cartridge
     cpu.pc = 0xC000
     pygame.init()
 
     window_size = w, h = 640, 480
     screen = pygame.display.set_mode(window_size)
-    window_rect = pygame.Rect(0, 0, w, h)
     memory_view_rect = pygame.Rect(0, 0, w - 128, h - 128)
     status_bits_rect = pygame.Rect(w - 128, 0, 128, 64)
     pc_rect = pygame.Rect(w - 128, 64, 128, 32)
