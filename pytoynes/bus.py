@@ -27,4 +27,4 @@ class Bus:
         elif addr >= 0x2000 and addr <= 0x3FFF:
             #TODO: ppu read from cpu
             pass
-        return 0
+        raise RuntimeError(f'Out of bound accessing: {hex(addr).upper()}')
