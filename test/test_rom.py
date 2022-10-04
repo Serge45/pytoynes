@@ -1,9 +1,6 @@
-from array import array
 import os
 import pathlib
 import unittest
-from pytoynes.rom import Rom
-from pytoynes.mos6502 import MOS6502
 from pytoynes.bus import Bus
 from pytoynes.cartridge import Cartridge
 
@@ -32,8 +29,7 @@ class UnitestRom(unittest.TestCase):
         
         bus = Bus()
         bus.cartridge = cartridge
-        cpu = MOS6502()
-        cpu.connect(bus)
+        cpu = bus.cpu
         cpu.pc = 0xC000
         ref_status = load_ref_ans_status(os.path.abspath('./pytoynes/assets/ref_ans.txt'))
         n_ops = 0

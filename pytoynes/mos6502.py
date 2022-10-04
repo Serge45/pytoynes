@@ -1,6 +1,5 @@
 from enum import IntEnum
 from typing import Callable
-from .bus import Bus
 
 class Instruction:
     def __init__(self,
@@ -315,7 +314,7 @@ class MOS6502:
         for f in Status:
             self._set_status(f, (status_int & f) > 0)
 
-    def connect(self, bus: Bus):
+    def connect(self, bus):
         self.bus = bus
 
     def read(self, addr: int):

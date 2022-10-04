@@ -1,18 +1,15 @@
 from threading import Thread
 import pygame
 from pytoynes.bus import Bus
-from pytoynes.rom import Rom 
 from pytoynes.mos6502 import MOS6502
 from pytoynes.cartridge import Cartridge
 from pytoynes.ui.memoryview import draw_memory_view, draw_status_bits, draw_program_counter, draw_registers
 
 def main():
-    cpu = MOS6502()
     bus = Bus()
-    cpu.connect(bus)
     cartridge = Cartridge('./pytoynes/assets/nestest.nes')
     bus.cartridge = cartridge
-    cpu.pc = 0xC000
+    bus.cpu.pc = 0xC000
     pygame.init()
 
     window_size = w, h = 640, 480
@@ -26,11 +23,11 @@ def main():
     cpu_running = True
 
     def cpu_thread_body():
-        nonlocal cpu
+        nonlocal bus
         cycle = 0
 
         while cpu_running is True:
-            cpu.clock()
+            bus.clock()
             cycle += 1
 
     cpu_thread = Thread(target=cpu_thread_body)
@@ -51,9 +48,9 @@ def main():
 
         screen.fill((0, 0, 0))
         draw_memory_view(bus, memory_view_rect, 0x0200, screen, font)
-        draw_status_bits(cpu, status_bits_rect, screen, font)
-        draw_program_counter(cpu, pc_rect, screen, font)
-        draw_registers(cpu, register_rect, screen, font)
+        draw_status_bits(bus.cpu, status_bits_rect, screen, font)
+        draw_program_counter(bus.cpu, pc_rect, screen, font)
+        draw_registers(bus.cpu, register_rect, screen, font)
         pygame.display.flip()
         clock.tick(60)
 

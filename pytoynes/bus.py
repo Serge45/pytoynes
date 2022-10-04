@@ -1,11 +1,15 @@
 from typing import Optional
 import array
 from .cartridge import Cartridge
+from .mos6502 import MOS6502
 
 class Bus:
     def __init__(self):
         self.ram = array.array('B', bytearray(2*1024))
         self.cartridge: Optional[Cartridge] = None
+        self.system_clock = 0
+        self.cpu = MOS6502()
+        self.cpu.connect(self)
 
     def write(self, addr, data):
         written = self.cartridge.cpu_write(addr, data)
@@ -28,3 +32,10 @@ class Bus:
             #TODO: ppu read from cpu
             pass
         raise RuntimeError(f'Out of bound accessing: {hex(addr).upper()}')
+
+    def reset(self):
+        self.system_clock = 0
+        self.cpu.reset()
+
+    def clock(self):
+        self.cpu.clock()

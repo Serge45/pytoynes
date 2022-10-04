@@ -5,11 +5,14 @@ from pytoynes.bus import Bus
 
 class UnitestAnd(unittest.TestCase):
     def setUp(self):
-        self.cpu = MOS6502()
+        class FakeCartidge:
+            def cpu_read(self, _):
+                return None
+
         self.bus = Bus()
-        self.cpu.connect(self.bus)
-        self.cpu.pc = 0
-        self.cpu.abs_addr = 0
+        self.bus.cpu.pc = 0
+        self.bus.cpu.abs_addr = 0
+        self.bus.cartridge = FakeCartidge()
 
     def tearDown(self):
         pass
@@ -20,6 +23,6 @@ class UnitestAnd(unittest.TestCase):
     def test_adc_imm(self):
         self.bus.ram[0] = 0x69
         self.bus.ram[1] = 10
-        self.cpu.a = 20
-        self.cpu.clock()
-        self.assertEqual(self.cpu.a, 30)
+        self.bus.cpu.a = 20
+        self.bus.cpu.clock()
+        self.assertEqual(self.bus.cpu.a, 30)
