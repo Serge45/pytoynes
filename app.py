@@ -4,6 +4,7 @@ from pytoynes.bus import Bus
 from pytoynes.mos6502 import MOS6502
 from pytoynes.cartridge import Cartridge
 from pytoynes.ui.memoryview import draw_memory_view, draw_status_bits, draw_program_counter, draw_registers
+from random import randint
 
 def main():
     bus = Bus()
@@ -21,6 +22,14 @@ def main():
     font = pygame.font.SysFont(None, 16)
     clock = pygame.time.Clock()
     cpu_running = True
+
+    def on_ppu_clocked(clock: int, scanline: int):
+        nonlocal screen
+        rand = randint(0, 1)
+        color = (236, 238, 236) if rand % 2 else (0, 0, 0)
+        screen.set_at((clock, scanline), color)
+
+    bus.ppu.on_ppu_clocked = on_ppu_clocked
 
     def cpu_thread_body():
         nonlocal bus
@@ -46,8 +55,11 @@ def main():
                     pygame.quit()
                     return
 
-        screen.fill((0, 0, 0))
-        draw_memory_view(bus, memory_view_rect, 0x0200, screen, font)
+        #screen.fill((0, 0, 0))
+        #draw_memory_view(bus, memory_view_rect, 0x0200, screen, font)
+        screen.fill((0, 0, 0), status_bits_rect)
+        screen.fill((0, 0, 0), pc_rect)
+        screen.fill((0, 0, 0), register_rect)
         draw_status_bits(bus.cpu, status_bits_rect, screen, font)
         draw_program_counter(bus.cpu, pc_rect, screen, font)
         draw_registers(bus.cpu, register_rect, screen, font)

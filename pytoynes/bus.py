@@ -2,6 +2,7 @@ from typing import Optional
 import array
 from .cartridge import Cartridge
 from .mos6502 import MOS6502
+from .v2c02 import V2C02
 
 class Bus:
     def __init__(self):
@@ -10,6 +11,7 @@ class Bus:
         self.system_clock = 0
         self.cpu = MOS6502()
         self.cpu.connect(self)
+        self.ppu = V2C02()
 
     def write(self, addr, data):
         written = self.cartridge.cpu_write(addr, data)
@@ -38,4 +40,10 @@ class Bus:
         self.cpu.reset()
 
     def clock(self):
-        self.cpu.clock()
+        self.ppu.clock()
+
+        if self.system_clock % 3 == 0:
+            self.cpu.clock()
+
+        # Hack to simply unit test
+        self.system_clock += 1
