@@ -4,7 +4,8 @@ from pytoynes.bus import Bus
 from pytoynes.mos6502 import MOS6502
 from pytoynes.cartridge import Cartridge
 from pytoynes.ui.memoryview import draw_memory_view, draw_status_bits, draw_program_counter, draw_registers
-from random import randint
+from random import random
+import numpy as np
 
 def main():
     bus = Bus()
@@ -22,22 +23,29 @@ def main():
     font = pygame.font.SysFont(None, 16)
     clock = pygame.time.Clock()
     cpu_running = True
+    game_surface = pygame.Surface((256, 240))
+    game_back_buffer = np.zeros((256, 240, 3), dtype=np.uint8)
+    colors = (236, 238, 236), (0, 0, 0) 
 
     def on_ppu_clocked(clock: int, scanline: int):
-        nonlocal screen
-        rand = randint(0, 1)
-        color = (236, 238, 236) if rand % 2 else (0, 0, 0)
-        screen.set_at((clock, scanline), color)
+        nonlocal game_back_buffer
+        rand = int(random() * 128) % 2
+        if clock < game_back_buffer.shape[1] and scanline < game_back_buffer.shape[0]:
+            game_back_buffer[scanline][clock] = colors[rand]
+
+    def on_frame_completed():
+        pygame.surfarray.blit_array(game_surface, game_back_buffer)
+        screen.blit(game_surface, (0, 0))
+        bus.ppu.frame_completed = False
 
     bus.ppu.on_ppu_clocked = on_ppu_clocked
+    bus.ppu.on_frame_completed = on_frame_completed
 
     def cpu_thread_body():
         nonlocal bus
-        cycle = 0
 
         while cpu_running is True:
             bus.clock()
-            cycle += 1
 
     cpu_thread = Thread(target=cpu_thread_body)
     cpu_thread.start()
@@ -55,7 +63,6 @@ def main():
                     pygame.quit()
                     return
 
-        #screen.fill((0, 0, 0))
         #draw_memory_view(bus, memory_view_rect, 0x0200, screen, font)
         screen.fill((0, 0, 0), status_bits_rect)
         screen.fill((0, 0, 0), pc_rect)
