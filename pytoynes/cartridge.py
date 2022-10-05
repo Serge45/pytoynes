@@ -27,3 +27,10 @@ class Cartridge:
         if mapped_addr is not None:
             self.prg_memory[mapped_addr] = data
             return data
+
+    def ppu_read(self, addr: int):
+        if addr >= 0 and addr <= 0x1FFF:
+            return self.rom.chr_rom_data[addr]
+
+    def ppu_write(self, addr: int, data: int):
+        pass
