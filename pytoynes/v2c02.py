@@ -1,6 +1,21 @@
 from .cartridge import Cartridge
 import numpy as np
+from dataclasses import dataclass
 class V2C02:
+    @dataclass
+    class Status:
+        sprite_overflow: bool = False
+        sprite_zero_hit: bool = False
+        vertical_blank: bool = False
+
+        def to_int(self):
+            return (int(self.sprite_overflow) << 5) | (int(self.sprite_zero_hit) << 6) | (int(self.vertical_blank) << 7)
+
+        def from_int(self, reg: int):
+            self.sprite_overflow = bool(0x04 & reg)
+            self.sprite_zero_hit = bool(0x02 & reg)
+            self.vertical_blank = bool(0x01 & reg)
+        
     def __init__(self):
         self.on_ppu_clocked = None
         self.on_frame_completed = None
@@ -11,6 +26,8 @@ class V2C02:
         self.pal_screen = np.zeros((64, 3), dtype=np.uint8)
         self.palette = np.zeros((32,), dtype=np.uint8)
         self._init_pal_screen()
+        self.status = V2C02.Status()
+        self.data_buffer = 0
 
     def _init_pal_screen(self):
         self.pal_screen[0x00] = (84, 84, 84)
@@ -93,6 +110,8 @@ class V2C02:
             if c_data is not None:
                 return c_data
 
+        assert False
+
     def write(self, addr: int, data: int) -> int:
         '''
         Write to PPU bus
@@ -104,6 +123,71 @@ class V2C02:
 
             if c_data is not None:
                 return c_data
+
+        assert False
+
+    def _cpu_read_only(self, addr: int):
+        if addr == 0:
+            pass
+        elif addr == 1:
+            pass
+        elif addr == 2:
+            pass
+        elif addr == 3:
+            pass
+        elif addr == 4:
+            pass
+        elif addr == 5:
+            pass
+        elif addr == 6:
+            pass
+        elif addr == 7:
+            pass
+
+    def cpu_read(self, addr: int, read_only=False) -> int:
+        if read_only is True:
+            return self._cpu_read_only(addr)
+
+        if addr == 0:
+            return None
+        elif addr == 1:
+            return None
+        elif addr == 2:
+            self.status.vertical_blank = True
+            data = (self.status.to_int() & 0xE0) | (self.data_buffer & 0x1F)
+            self.status.vertical_blank = False
+            return data
+        elif addr == 3:
+            pass
+        elif addr == 4:
+            pass
+        elif addr == 5:
+            pass
+        elif addr == 6:
+            pass
+        elif addr == 7:
+            pass
+
+        assert False
+
+    def cpu_write(self, addr: int, data: int) -> int:
+        if addr == 0:
+            pass
+        elif addr == 1:
+            pass
+        elif addr == 2:
+            return
+        elif addr == 3:
+            pass
+        elif addr == 4:
+            pass
+        elif addr == 5:
+            pass
+        elif addr == 6:
+            pass
+        elif addr == 7:
+            pass
+        assert False
 
     def getColor(self, palette: int, pixel: int) -> np.ndarray:
         addr = (0x3F00 + palette * 4 + pixel) & 0x3F

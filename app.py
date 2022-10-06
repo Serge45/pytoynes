@@ -11,7 +11,8 @@ def main():
     bus = Bus()
     cartridge = Cartridge('./pytoynes/assets/nestest.nes')
     bus.cartridge = cartridge
-    bus.cpu.pc = 0xC000
+    bus.reset()
+    #bus.cpu.pc = 0xC000
     pygame.init()
 
     window_size = w, h = 640, 480
