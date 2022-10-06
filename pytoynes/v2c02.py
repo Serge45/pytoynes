@@ -189,7 +189,7 @@ class V2C02:
             pass
         assert False
 
-    def getColor(self, palette: int, pixel: int) -> np.ndarray:
+    def get_color(self, palette: int, pixel: int) -> np.ndarray:
         addr = (0x3F00 + palette * 4 + pixel) & 0x3F
         return self.read(addr)
 
