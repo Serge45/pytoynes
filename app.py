@@ -31,6 +31,14 @@ def main():
 
         while cpu_running is True:
             cpu.clock()
+            # PPU clocks 3 times for every CPU clock (NTSC)
+            for _ in range(3):
+                bus.ppu.clock()
+            
+            if bus.ppu.nmi:
+                bus.ppu.nmi = False
+                cpu.nmi()
+            
             cycle += 1
 
     cpu_thread = Thread(target=cpu_thread_body)

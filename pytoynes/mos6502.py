@@ -352,12 +352,13 @@ class MOS6502:
         self.a = 0
         self.x = 0
         self.y = 0
-        self.stkp = 0x00FD
+        self.stkp = 0xFD
 
         for s in self.status:
             self._set_status(s, False)
 
         self._set_status(Status.U, True)
+        self._set_status(Status.I, True)
 
         self.abs_addr = 0xFFFC
 

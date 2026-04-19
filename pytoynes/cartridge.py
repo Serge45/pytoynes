@@ -8,6 +8,11 @@ class Cartridge:
         self.mapper: Optional[Mapper] = None
         # make deep copy for reset
         self.prg_memory = self.rom.prg_rom_data[:]
+        
+        if self.rom.num_chr_banks > 0:
+            self.chr_memory = self.rom.chr_rom_data[:]
+        else:
+            self.chr_memory = bytearray(8192)
 
         if self.rom.mapper == 0:
             self.mapper = Mapper000(self.rom.num_prg_banks, self.rom.num_chr_banks)
@@ -22,8 +27,23 @@ class Cartridge:
 
     def cpu_write(self, addr: int, data):
         assert self.mapper, 'No valid mapper'
-        mapped_addr = self.mapper.map_cpu_read_addr(addr)
+        mapped_addr = self.mapper.map_cpu_write_addr(addr)
 
         if mapped_addr is not None:
             self.prg_memory[mapped_addr] = data
+            return data
+
+    def ppu_read(self, addr: int):
+        assert self.mapper, 'No valid mapper'
+        mapped_addr = self.mapper.map_ppu_read_addr(addr)
+
+        if mapped_addr is not None:
+            return self.chr_memory[mapped_addr]
+
+    def ppu_write(self, addr: int, data: int):
+        assert self.mapper, 'No valid mapper'
+        mapped_addr = self.mapper.map_ppu_write_addr(addr)
+
+        if mapped_addr is not None:
+            self.chr_memory[mapped_addr] = data
             return data
