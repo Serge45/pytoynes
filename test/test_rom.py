@@ -61,7 +61,7 @@ class UnitestRom(unittest.TestCase):
         bus.ppu.ppu_status = 0x80
         self.assertEqual(bus.read(0x2002), 0x80)
         # Check if address latch was reset by reading PPUSTATUS
-        self.assertEqual(bus.ppu.address_latch, 0)
+        self.assertEqual(bus.ppu.w, 0)
 
     def test_ppu_data_access(self):
         bus = Bus()
@@ -120,6 +120,30 @@ class UnitestRom(unittest.TestCase):
         # Verify PPU OAM content
         for i in range(256):
             self.assertEqual(bus.ppu.oam_vram[i], i)
+
+    def test_nametable_mirroring(self):
+        from pytoynes.rom import MirrorMode
+        bus = Bus()
+        
+        # Test Vertical Mirroring
+        bus.ppu.mirror_mode = MirrorMode.VERTICAL
+        # Write to NT0 ($2000)
+        bus.ppu.ppu_write(0x2000, 0xAA)
+        # Should be mirrored to NT2 ($2800)
+        self.assertEqual(bus.ppu.ppu_read(0x2800), 0xAA)
+        
+        # Test Horizontal Mirroring
+        bus.ppu.mirror_mode = MirrorMode.HORIZONTAL
+        # Clear VRAM
+        bus.ppu.vram = bytearray(2048)
+        # Write to NT0 ($2000)
+        bus.ppu.ppu_write(0x2000, 0xBB)
+        # Should be mirrored to NT1 ($2400)
+        self.assertEqual(bus.ppu.ppu_read(0x2400), 0xBB)
+        # NT2 ($2800) should be different from NT0
+        bus.ppu.ppu_write(0x2800, 0xCC)
+        self.assertEqual(bus.ppu.ppu_read(0x2C00), 0xCC)
+        self.assertNotEqual(bus.ppu.ppu_read(0x2000), 0xCC)
 
     def test_nestest_cpu(self):
         p = pathlib.Path('./pytoynes/assets/nestest.nes').absolute()

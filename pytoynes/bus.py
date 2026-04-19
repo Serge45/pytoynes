@@ -6,8 +6,18 @@ from .ppu import PPU
 class Bus:
     def __init__(self):
         self.ram = array.array('B', bytearray(2*1024))
-        self.cartridge: Optional[Cartridge] = None
+        self._cartridge: Optional[Cartridge] = None
         self.ppu = PPU()
+
+    @property
+    def cartridge(self):
+        return self._cartridge
+
+    @cartridge.setter
+    def cartridge(self, cartridge):
+        self._cartridge = cartridge
+        self.ppu.connect_cartridge(cartridge)
+        self.ppu.mirror_mode = cartridge.rom.mirroring
 
     def write(self, addr, data):
         written = None
