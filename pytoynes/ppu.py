@@ -56,8 +56,17 @@ class PPU:
         self.sprite_attribs = array.array('B', bytearray(8))
         self.sprite_x_counters = array.array('B', bytearray(8))
         self.sprite_zero_hit_possible = False
+        
+        self.is_odd_frame = False
 
     def clock(self):
+        # Odd frame cycle skip
+        if self.scanline == -1 and self.cycle == 339 and (self.ppu_mask & 0x18) and self.is_odd_frame:
+            self.cycle = 0
+            self.scanline = 0
+            self.is_odd_frame = not self.is_odd_frame
+            return
+
         if self.scanline >= -1 and self.scanline <= 239:
             # Sprite evaluation and fetches
             if self.cycle == 257 and self.scanline >= 0:
@@ -109,20 +118,22 @@ class PPU:
                 self.scanline = 0
                 self.ppu_status &= ~0xC0 # Clear VBlank and Sprite 0 Hit
                 self.nmi = False
+                self.is_odd_frame = not self.is_odd_frame
 
     def _render_pixel(self):
         # Background pixel
         bg_pixel = 0
         bg_palette = 0
         if self.ppu_mask & 0x08:
-            bit_mux = 0x8000 >> self.fine_x
-            p0_pixel = (self.bg_shifter_tile_lo & bit_mux) > 0
-            p1_pixel = (self.bg_shifter_tile_hi & bit_mux) > 0
-            bg_pixel = (p1_pixel << 1) | p0_pixel
-            
-            bg_pal0 = (self.bg_shifter_attrib_lo & bit_mux) > 0
-            bg_pal1 = (self.bg_shifter_attrib_hi & bit_mux) > 0
-            bg_palette = (bg_pal1 << 1) | bg_pal0
+            if self.cycle > 8 or (self.ppu_mask & 0x02):
+                bit_mux = 0x8000 >> self.fine_x
+                p0_pixel = (self.bg_shifter_tile_lo & bit_mux) > 0
+                p1_pixel = (self.bg_shifter_tile_hi & bit_mux) > 0
+                bg_pixel = (p1_pixel << 1) | p0_pixel
+                
+                bg_pal0 = (self.bg_shifter_attrib_lo & bit_mux) > 0
+                bg_pal1 = (self.bg_shifter_attrib_hi & bit_mux) > 0
+                bg_palette = (bg_pal1 << 1) | bg_pal0
 
         # Sprite pixel
         fg_pixel = 0
@@ -131,18 +142,19 @@ class PPU:
         sprite_zero_hit = False
         
         if self.ppu_mask & 0x10: # Sprite rendering enabled
-            for i in range(self.sprite_count):
-                if self.sprite_x_counters[i] == 0:
-                    pixel_lo = (self.sprite_shifter_pattern_lo[i] & 0x80) > 0
-                    pixel_hi = (self.sprite_shifter_pattern_hi[i] & 0x80) > 0
-                    fg_pixel = (pixel_hi << 1) | pixel_lo
-                    fg_palette = (self.sprite_attribs[i] & 0x03) + 0x04
-                    fg_priority = (self.sprite_attribs[i] & 0x20) == 0 # 0: in front, 1: behind
-                    
-                    if fg_pixel != 0:
-                        if i == 0 and self.sprite_zero_hit_possible:
-                            sprite_zero_hit = True
-                        break
+            if self.cycle > 8 or (self.ppu_mask & 0x04):
+                for i in range(self.sprite_count):
+                    if self.sprite_x_counters[i] == 0:
+                        pixel_lo = (self.sprite_shifter_pattern_lo[i] & 0x80) > 0
+                        pixel_hi = (self.sprite_shifter_pattern_hi[i] & 0x80) > 0
+                        fg_pixel = (pixel_hi << 1) | pixel_lo
+                        fg_palette = (self.sprite_attribs[i] & 0x03) + 0x04
+                        fg_priority = (self.sprite_attribs[i] & 0x20) == 0 # 0: in front, 1: behind
+                        
+                        if fg_pixel != 0:
+                            if i == 0 and self.sprite_zero_hit_possible:
+                                sprite_zero_hit = True
+                            break
 
         # Priority Multiplexer
         pixel = 0
@@ -170,6 +182,9 @@ class PPU:
                          self.ppu_status |= 0x40
         
         color_idx = self.ppu_read(0x3F00 + (palette << 2) + pixel)
+        if self.ppu_mask & 0x01: # Grayscale
+            color_idx &= 0x30
+            
         self.pixels[self.scanline * 256 + (self.cycle - 1)] = color_idx
 
     def _update_shifters(self):
