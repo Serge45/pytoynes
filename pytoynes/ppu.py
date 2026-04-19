@@ -321,6 +321,13 @@ class PPU:
             self.ppu_write(self.v, data)
             self.v = (self.v + (32 if (self.ppu_ctrl & 0x04) else 1)) & 0x7FFF
 
+    def get_pattern_pixel(self, table: int, tile_idx: int, x: int, y: int) -> int:
+        base_addr = table * 0x1000 + tile_idx * 16
+        low_byte = self.ppu_read(base_addr + y)
+        high_byte = self.ppu_read(base_addr + y + 8)
+        bit_pos = 7 - x
+        return (((high_byte >> bit_pos) & 0x01) << 1) | ((low_byte >> bit_pos) & 0x01)
+
     def connect_cartridge(self, cartridge: Cartridge): self.cartridge = cartridge
 
     def ppu_read(self, addr: int) -> int:
