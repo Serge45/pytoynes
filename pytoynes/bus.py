@@ -2,12 +2,14 @@ from typing import Optional
 import array
 from .cartridge import Cartridge
 from .ppu import PPU
+from .controller import Controller
 
 class Bus:
     def __init__(self):
         self.ram = array.array('B', bytearray(2*1024))
         self._cartridge: Optional[Cartridge] = None
         self.ppu = PPU()
+        self.controllers = [Controller(), Controller()]
 
     @property
     def cartridge(self):
@@ -35,6 +37,10 @@ class Bus:
                 for i in range(256):
                     self.ppu.oam_vram[i] = self.read(base_addr + i)
                 # TODO: CPU should be stalled for ~513 cycles
+            elif addr == 0x4016:
+                # Controller Strobe
+                self.controllers[0].write(data)
+                self.controllers[1].write(data)
 
     def read(self, addr):
         data = None
@@ -47,5 +53,9 @@ class Bus:
             return self.ram[addr & 0x07FF]
         elif addr >= 0x2000 and addr <= 0x3FFF:
             return self.ppu.cpu_read(addr)
+        elif addr == 0x4016:
+            return self.controllers[0].read()
+        elif addr == 0x4017:
+            return self.controllers[1].read()
         
         return 0
