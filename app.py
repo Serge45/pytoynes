@@ -29,12 +29,14 @@ def main():
     
     # Initialize CPU
     cpu.reset()
-    if 'nestest.nes' in rom_path:
-        cpu.pc = 0xC000 # Specific entry for nestest automation
+    # Read reset vector from 0xFFFC
+    lo = bus.read(0xFFFC)
+    hi = bus.read(0xFFFD)
+    cpu.pc = (hi << 8) | lo
     
     pygame.init()
 
-    window_size = w, h = 1024, 768
+    window_size = w, h = 1200, 800
     screen = pygame.display.set_mode(window_size)
     pygame.display.set_caption(f"Pytoynes - {rom_path}")
     
@@ -42,7 +44,8 @@ def main():
     status_bits_rect = pygame.Rect(420, 0, 128, 64)
     pc_rect = pygame.Rect(420, 64, 128, 32)
     register_rect = pygame.Rect(420, 64 + 32, 128, 64)
-    ppu_screen_rect = pygame.Rect(560, 0, 256*2, 240*2)
+    # Using 3x scale for PPU screen (256*3=768, 240*3=720)
+    ppu_screen_rect = pygame.Rect(420, 150, 256*3, 240*3)
     pattern_table_0_rect = pygame.Rect(0, 320, 256, 256)
     pattern_table_1_rect = pygame.Rect(270, 320, 256, 256)
     
