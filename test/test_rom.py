@@ -145,6 +145,48 @@ class UnitestRom(unittest.TestCase):
         self.assertEqual(bus.ppu.ppu_read(0x2C00), 0xCC)
         self.assertNotEqual(bus.ppu.ppu_read(0x2000), 0xCC)
 
+    def test_sprite_zero_hit(self):
+        bus = Bus()
+        ppu = bus.ppu
+        
+        # Enable BG and Sprites
+        ppu.ppu_mask = 0x18
+        
+        # Setup Sprite 0 at (10, 10)
+        ppu.oam_vram[0] = 10 # Y
+        ppu.oam_vram[1] = 0x01 # Tile
+        ppu.oam_vram[2] = 0x00 # Attr
+        ppu.oam_vram[3] = 10 # X
+        
+        # We need a cartridge for pattern data
+        # For simplicity, let's mock cartridge.ppu_read to return 0xFF for tile 0x01
+        class MockCartridge:
+            def ppu_read(self, addr): return 0xFF
+            def ppu_write(self, addr, data): pass
+        ppu.cartridge = MockCartridge()
+        
+        # Setup Background to be opaque at (10, 10)
+        # Force bg_shifter_tile_lo to have an opaque bit at the right time
+        ppu.bg_shifter_tile_lo = 0xFFFF
+        
+        # Run PPU until scanline 10, cycle 10
+        ppu.scanline = 10
+        ppu.cycle = 1
+        ppu.sprite_count = 1
+        ppu.sprite_shifter_pattern_lo[0] = 0xFF
+        ppu.sprite_x_counters[0] = 10
+        ppu.sprite_zero_hit_possible = True
+        
+        # Step cycles
+        for i in range(20):
+            ppu._update_shifters()
+            ppu._render_pixel()
+            ppu.cycle += 1
+            if ppu.ppu_status & 0x40:
+                break
+                
+        self.assertTrue(ppu.ppu_status & 0x40, "Sprite 0 Hit should be set")
+
     def test_nestest_cpu(self):
         p = pathlib.Path('./pytoynes/assets/nestest.nes').absolute()
         cartridge = Cartridge(str(p))
