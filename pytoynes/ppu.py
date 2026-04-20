@@ -150,6 +150,9 @@ class PPU:
                     # Fast path: skip VBlank scanline (no rendering)
                     self.total_cycles += 341
                     self.scanline += 1
+                    if self.scanline == 241:
+                        self.ppu_status |= 0x80
+                        if self.ppu_ctrl & 0x80: self.nmi = True
                 elif self.scanline >= 261:
                     # Fast path: end of frame
                     self.total_cycles += 341
