@@ -54,10 +54,27 @@ def main():
     clock = pygame.time.Clock()
     cpu_running = True
     frame_count = 0
-    debug_mode = True
-    total_cpu_cycles = 0
+    debug_mode = False
+
+    def cpu_thread_body():
+        nonlocal cpu
+        total_cpu_cycles = 0
+        while cpu_running is True:
+            cycles = cpu.clock()
+            total_cpu_cycles += cycles
+
+            # Synchronize PPU (3 PPU cycles per 1 CPU cycle)
+            bus.ppu.run_to(total_cpu_cycles * 3)
+
+            if bus.ppu.nmi:
+                bus.ppu.nmi = False
+                cpu.nmi()
+
+    cpu_thread = Thread(target=cpu_thread_body)
+    cpu_thread.start()
 
     key_map = {
+
 
         pygame.K_z: BUTTON_A,
         pygame.K_x: BUTTON_B,
@@ -75,6 +92,7 @@ def main():
         for e in events:
             if e.type == pygame.QUIT:
                 cpu_running = False
+                cpu_thread.join()
                 pygame.quit()
                 return
             if e.type == pygame.KEYDOWN:
@@ -82,6 +100,7 @@ def main():
                     print(f'0x0002: {bus.ram[0x0002]:04x}, 0x0003: {bus.ram[0x0003]:04x}')
                 elif e.unicode == 'q':
                     cpu_running = False
+                    cpu_thread.join()
                     pygame.quit()
                     return
                 elif e.key == pygame.K_TAB:
@@ -91,20 +110,6 @@ def main():
             if e.type == pygame.KEYUP:
                 if e.key in key_map:
                     bus.controllers[0].set_button(key_map[e.key], False)
-
-        # Run emulation for roughly one frame (29780 CPU cycles)
-        cycles_this_frame = 0
-        while cycles_this_frame < 29780:
-            cycles = cpu.clock()
-            cycles_this_frame += cycles
-            total_cpu_cycles += cycles
-            
-            # Synchronize PPU (3 PPU cycles per 1 CPU cycle)
-            bus.ppu.run_to(total_cpu_cycles * 3)
-            
-            if bus.ppu.nmi:
-                bus.ppu.nmi = False
-                cpu.nmi()
 
         screen.fill((0, 0, 0))
         if debug_mode:

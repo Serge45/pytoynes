@@ -52,8 +52,9 @@ def draw_status_bits(cpu: MOS6502, rect: pygame.Rect, dst_surf: pygame.Surface, 
         dst_surf.blit(val_surf, (rect.x + i * step_width, rect.y + step_height))
         
 def draw_program_counter(cpu: MOS6502, rect: pygame.Rect, dst_surf: pygame.Surface, font: pygame.font.Font):
-    pc = cpu.opcode
-    inst_name = cpu.opcode_to_instruction[pc].name if pc is not None else 'None'
+    op = cpu.opcode
+    entry = cpu.opcode_table[op] if op is not None else None
+    inst_name = entry[0] if entry else 'None'
     inst_name_surf = font.render(f'PC: {inst_name}', False, TEXT_COLOR)
     dst_surf.blit(inst_name_surf, (rect.x, rect.y))
 
