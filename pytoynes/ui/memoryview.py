@@ -108,7 +108,7 @@ def draw_pattern_table(bus: Bus, table_idx: int, rect: pygame.Rect, dst_surf: py
 
 def draw_ppu_screen(bus: Bus, rect: pygame.Rect, dst_surf: pygame.Surface):
     # Optimized rendering using surfarray
-    ppu_pixels = np.array(bus.ppu.pixels).reshape((240, 256))
+    ppu_pixels = np.frombuffer(bus.ppu.pixels, dtype=np.uint8).reshape((240, 256))
     
     # Map pixel indices to RGB values
     rgb_surf = NES_PALETTE[ppu_pixels]
@@ -119,8 +119,6 @@ def draw_ppu_screen(bus: Bus, rect: pygame.Rect, dst_surf: pygame.Surface):
     scaled_surf = pygame.transform.scale(temp_surf, (rect.width, rect.height))
     dst_surf.blit(scaled_surf, (rect.x, rect.y))
 
-def draw_fps(clock: pygame.time.Clock, ppu_frames: int, rect: pygame.Rect, dst_surf: pygame.Surface, font: pygame.font.Font):
-    fps = clock.get_fps()
-    # Emulated FPS is harder to calculate without state, so we'll just show the total frames for now
-    fps_surf = font.render(f'FPS: {fps:.2f} (Emu Frames: {ppu_frames})', False, (255, 255, 0))
+def draw_fps(clock: pygame.time.Clock, ppu_frames: int, rect: pygame.Rect, dst_surf: pygame.Surface, font: pygame.font.Font, emu_fps: float = 0.0):
+    fps_surf = font.render(f'EmuFPS: {emu_fps:.1f} (Frames: {ppu_frames})', False, (255, 255, 0))
     dst_surf.blit(fps_surf, (rect.x, rect.y))

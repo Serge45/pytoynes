@@ -1,4 +1,5 @@
 from threading import Thread
+import time
 import pygame
 import sys
 from pytoynes.bus import Bus
@@ -55,20 +56,34 @@ def main():
     cpu_running = True
     frame_count = 0
     debug_mode = False
+    emu_fps = 0.0
+    last_emu_fps_time = pygame.time.get_ticks()
+    last_ppu_frame_count = 0
 
     def cpu_thread_body():
         nonlocal cpu
         total_cpu_cycles = 0
-        while cpu_running is True:
-            cycles = cpu.clock()
-            total_cpu_cycles += cycles
+        FRAME_DURATION_S = 1.0 / 60.0988  # NTSC: ~16.639 ms per frame
 
-            # Synchronize PPU (3 PPU cycles per 1 CPU cycle)
-            bus.ppu.run_to(total_cpu_cycles * 3)
+        while cpu_running:
+            frame_start = time.perf_counter()
+            target_frame = bus.ppu.frame_count + 1
 
-            if bus.ppu.nmi:
-                bus.ppu.nmi = False
-                cpu.nmi()
+            # Run one full NES frame worth of CPU/PPU cycles
+            while bus.ppu.frame_count < target_frame and cpu_running:
+                cycles = cpu.clock()
+                total_cpu_cycles += cycles
+                # Synchronize PPU (3 PPU cycles per 1 CPU cycle)
+                bus.ppu.run_to(total_cpu_cycles * 3)
+                if bus.ppu.nmi:
+                    bus.ppu.nmi = False
+                    cpu.nmi()
+
+            # Sleep for the remaining frame budget to avoid burning 100% CPU
+            elapsed = time.perf_counter() - frame_start
+            sleep_s = FRAME_DURATION_S - elapsed
+            if sleep_s > 0:
+                time.sleep(sleep_s)
 
     cpu_thread = Thread(target=cpu_thread_body)
     cpu_thread.start()
@@ -111,6 +126,13 @@ def main():
                 if e.key in key_map:
                     bus.controllers[0].set_button(key_map[e.key], False)
 
+        now = pygame.time.get_ticks()
+        elapsed_ms = now - last_emu_fps_time
+        if elapsed_ms >= 1000:
+            emu_fps = (bus.ppu.frame_count - last_ppu_frame_count) / (elapsed_ms / 1000.0)
+            last_ppu_frame_count = bus.ppu.frame_count
+            last_emu_fps_time = now
+
         screen.fill((0, 0, 0))
         if debug_mode:
             if frame_count % 10 == 0:
@@ -121,7 +143,7 @@ def main():
             draw_status_bits(cpu, status_bits_rect, screen, font)
             draw_program_counter(cpu, pc_rect, screen, font)
             draw_registers(cpu, register_rect, screen, font)
-            draw_fps(clock, bus.ppu.frame_count, fps_rect, screen, font)
+            draw_fps(clock, bus.ppu.frame_count, fps_rect, screen, font, emu_fps)
         
         draw_ppu_screen(bus, ppu_screen_rect, screen)
         pygame.display.flip()
