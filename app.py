@@ -73,8 +73,10 @@ def main():
             while bus.ppu.frame_count < target_frame and cpu_running:
                 cycles = cpu.clock()
                 total_cpu_cycles += cycles
-                # Synchronize PPU (3 PPU cycles per 1 CPU cycle)
-                bus.ppu.run_to(total_cpu_cycles * 3)
+                # Sync PPU only at instruction boundaries (cpu.cycle==0 means
+                # the instruction just finished; next call starts a new one)
+                if cpu.cycle == 0:
+                    bus.ppu.run_to(total_cpu_cycles * 3)
                 if bus.ppu.nmi:
                     bus.ppu.nmi = False
                     cpu.nmi()
