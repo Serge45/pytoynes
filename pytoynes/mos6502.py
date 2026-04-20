@@ -342,6 +342,7 @@ class MOS6502:
 
         assert self.cycle > 0
         self.cycle -= 1
+        return 1
 
     def fetch(self):
         if self.opcode_to_instruction[self.opcode].address != self._addr_imp:

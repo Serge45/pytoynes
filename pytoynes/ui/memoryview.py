@@ -5,35 +5,41 @@ from pytoynes.mos6502 import MOS6502
 
 TEXT_COLOR = (255, 255, 255)
 
-# NES RGB Palette (Approximate)
+# NES RGB Palette (Standard High-Fidelity)
 NES_PALETTE = np.array([
-    [124, 124, 124], [0, 0, 252], [0, 0, 188], [68, 40, 188],
-    [148, 0, 132], [168, 0, 32], [168, 16, 0], [136, 20, 0],
-    [80, 48, 0], [0, 120, 0], [0, 104, 0], [0, 88, 0],
-    [0, 64, 88], [0, 0, 0], [0, 0, 0], [0, 0, 0],
-    [188, 188, 188], [0, 120, 248], [0, 88, 248], [104, 68, 252],
-    [216, 0, 204], [228, 0, 88], [248, 56, 0], [228, 92, 16],
-    [172, 124, 0], [0, 184, 0], [0, 168, 0], [0, 168, 68],
-    [0, 136, 136], [0, 0, 0], [0, 0, 0], [0, 0, 0],
-    [248, 248, 248], [60, 188, 252], [104, 136, 252], [152, 120, 248],
-    [248, 120, 248], [248, 88, 152], [248, 120, 88], [252, 160, 68],
-    [248, 184, 0], [184, 248, 24], [88, 216, 84], [88, 248, 152],
-    [0, 232, 216], [120, 120, 120], [0, 0, 0], [0, 0, 0],
-    [252, 252, 252], [164, 228, 252], [184, 184, 248], [216, 184, 248],
-    [248, 184, 248], [248, 164, 192], [240, 208, 176], [254, 224, 164],
-    [251, 228, 136], [216, 248, 120], [184, 248, 184], [184, 248, 216],
-    [0, 252, 252], [248, 216, 248], [0, 0, 0], [0, 0, 0]
+    [0x66,0x66,0x66], [0x00,0x2A,0x88], [0x14,0x12,0xA7], [0x3B,0x00,0xA4],
+    [0x5C,0x00,0x7E], [0x6E,0x00,0x40], [0x6C,0x06,0x00], [0x56,0x1D,0x00],
+    [0x33,0x35,0x00], [0x0B,0x48,0x00], [0x00,0x52,0x00], [0x00,0x4F,0x08],
+    [0x00,0x40,0x4D], [0x00,0x00,0x00], [0x00,0x00,0x00], [0x00,0x00,0x00],
+    [0xAD,0xAD,0xAD], [0x15,0x5F,0xD9], [0x42,0x40,0xFF], [0x75,0x27,0xFE],
+    [0xA0,0x1A,0xCC], [0xB7,0x1E,0x7B], [0xB5,0x31,0x20], [0x99,0x4E,0x00],
+    [0x6B,0x6D,0x00], [0x38,0x87,0x00], [0x0C,0x93,0x00], [0x00,0x8F,0x32],
+    [0x00,0x7C,0x8D], [0x00,0x00,0x00], [0x00,0x00,0x00], [0x00,0x00,0x00],
+    [0xFF,0xFE,0xFF], [0x64,0xB0,0xFF], [0x92,0x90,0xFF], [0xC6,0x76,0xFF],
+    [0xF3,0x6A,0xFF], [0xFE,0x6E,0xCC], [0xFE,0x81,0x70], [0xEA,0x9E,0x22],
+    [0xBC,0xBE,0x00], [0x88,0xD8,0x00], [0x5C,0xE4,0x30], [0x45,0xE0,0x82],
+    [0x48,0xCD,0xDE], [0x4F,0x4F,0x4F], [0x00,0x00,0x00], [0x00,0x00,0x00],
+    [0xFF,0xFE,0xFF], [0xC0,0xDF,0xFF], [0xD3,0xD2,0xFF], [0xE8,0xC8,0xFF],
+    [0xFB,0xC2,0xFF], [0xFE,0xC4,0xEA], [0xFE,0xCC,0xC5], [0xF7,0xD8,0xA5],
+    [0xE4,0xE5,0x94], [0xCF,0xEF,0x96], [0xBD,0xF4,0xAB], [0xB3,0xF3,0xCC],
+    [0xB5,0xEB,0xF2], [0xB8,0xB8,0xB8], [0x00,0x00,0x00], [0x00,0x00,0x00]
 ], dtype=np.uint8)
 
 def draw_memory_view(bus: Bus, rect: pygame.Rect, start_mem_addr: int, dst_surf: pygame.Surface, font: pygame.font.Font):
-    step_width = rect.width // 16
     step_height = 16
+    num_rows = rect.height // step_height
 
-    for i in range(rect.height // step_height):
-        for j in range(16):
-            val_str = hex(bus.ram[j + start_mem_addr + i * 16])
-            text_surf = font.render(val_str, False, TEXT_COLOR)
-            dst_surf.blit(text_surf, (j * step_width, i * step_height))
+    for i in range(num_rows):
+        addr = start_mem_addr + i * 16
+        if addr >= len(bus.ram): break
+        
+        # Render a whole row at once: "ADDR: 00 11 22 33 44 55 66 77 88 99 AA BB CC DD EE FF"
+        row_data = bus.ram[addr:addr+16]
+        hex_data = " ".join([f"{b:02X}" for b in row_data])
+        row_str = f"{addr:04X}: {hex_data}"
+        
+        text_surf = font.render(row_str, False, TEXT_COLOR)
+        dst_surf.blit(text_surf, (rect.x, rect.y + i * step_height))
 
 def draw_status_bits(cpu: MOS6502, rect: pygame.Rect, dst_surf: pygame.Surface, font: pygame.font.Font):
     step_width = rect.width // len(cpu.status)
@@ -64,22 +70,37 @@ def draw_registers(cpu: MOS6502, rect: pygame.Rect, dst_surf: pygame.Surface, fo
 def draw_pattern_table(bus: Bus, table_idx: int, rect: pygame.Rect, dst_surf: pygame.Surface):
     ppu = bus.ppu
     
-    colors = [
-        (0, 0, 0),
-        (85, 85, 85),
-        (170, 170, 170),
-        (255, 255, 255)
-    ]
+    # Simple grayscale colors for the 4 possible values
+    colors = np.array([
+        [0, 0, 0],
+        [85, 85, 85],
+        [170, 170, 170],
+        [255, 255, 255]
+    ], dtype=np.uint8)
     
-    temp_surf = pygame.Surface((128, 128))
+    # Create 128x128 array for the pattern table
+    pixels = np.zeros((128, 128), dtype=np.uint8)
     
     for tile_y in range(16):
         for tile_x in range(16):
             tile_idx = tile_y * 16 + tile_x
+            base_addr = table_idx * 0x1000 + tile_idx * 16
+            
+            # Fetch 8x8 tile data
             for py in range(8):
+                low_byte = ppu.ppu_read(base_addr + py)
+                high_byte = ppu.ppu_read(base_addr + py + 8)
+                
                 for px in range(8):
-                    pixel_val = ppu.get_pattern_pixel(table_idx, tile_idx, px, py)
-                    temp_surf.set_at((tile_x * 8 + px, tile_y * 8 + py), colors[pixel_val])
+                    bit_pos = 7 - px
+                    pixel_val = (((high_byte >> bit_pos) & 0x01) << 1) | ((low_byte >> bit_pos) & 0x01)
+                    pixels[tile_y * 8 + py, tile_x * 8 + px] = pixel_val
+    
+    # Map pixel values to RGB colors
+    rgb_array = colors[pixels]
+    
+    # Create surface from RGB array
+    temp_surf = pygame.surfarray.make_surface(np.transpose(rgb_array, (1, 0, 2)))
     
     scaled_surf = pygame.transform.scale(temp_surf, (rect.width, rect.height))
     dst_surf.blit(scaled_surf, (rect.x, rect.y))
@@ -96,3 +117,9 @@ def draw_ppu_screen(bus: Bus, rect: pygame.Rect, dst_surf: pygame.Surface):
     
     scaled_surf = pygame.transform.scale(temp_surf, (rect.width, rect.height))
     dst_surf.blit(scaled_surf, (rect.x, rect.y))
+
+def draw_fps(clock: pygame.time.Clock, ppu_frames: int, rect: pygame.Rect, dst_surf: pygame.Surface, font: pygame.font.Font):
+    fps = clock.get_fps()
+    # Emulated FPS is harder to calculate without state, so we'll just show the total frames for now
+    fps_surf = font.render(f'FPS: {fps:.2f} (Emu Frames: {ppu_frames})', False, (255, 255, 0))
+    dst_surf.blit(fps_surf, (rect.x, rect.y))

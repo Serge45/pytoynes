@@ -34,6 +34,8 @@ class PPU:
         # Rendering state
         self.scanline = 0
         self.cycle = 0
+        self.total_cycles = 0
+        self.frame_count = 0
         self.nmi = False
         
         # Background fetch buffers
@@ -60,72 +62,98 @@ class PPU:
         self.is_odd_frame = False
 
     def clock(self):
-        # Odd frame cycle skip
-        if self.scanline == -1 and self.cycle == 339 and (self.ppu_mask & 0x18) and self.is_odd_frame:
-            self.cycle = 0
-            self.scanline = 0
-            self.is_odd_frame = not self.is_odd_frame
-            return
+        # Pre-calculate active rendering check
+        scanline = self.scanline
+        cycle = self.cycle
 
-        if self.scanline >= -1 and self.scanline <= 239:
+        # Active Rendering Region (-1 to 239)
+        if -1 <= scanline <= 239:
             # Sprite evaluation and fetches
-            if self.cycle == 257 and self.scanline >= 0:
-                self._evaluate_sprites()
-            
-            if self.cycle == 340 and self.scanline >= -1:
-                self._fetch_sprite_data()
+            if cycle == 257:
+                if scanline >= -1: self._evaluate_sprites()
+            elif cycle == 340:
+                if scanline >= -1: self._fetch_sprite_data()
 
-            # Visible scanlines
-            if self.cycle >= 1 and self.cycle <= 256:
-                self._update_shifters()
-                if self.scanline >= 0:
+            # Visible Area (1 to 256)
+            if 1 <= cycle <= 256:
+                if scanline >= 0:
                     self._render_pixel()
+                self._update_shifters()
                 
-                if self.cycle % 8 == 0:
+                # Fetching logic (every 8 cycles)
+                phase = cycle & 0x07
+                if phase == 0:
                     self._load_shifters()
                     self._increment_scroll_x()
-                elif self.cycle % 8 == 1: self._fetch_nt()
-                elif self.cycle % 8 == 3: self._fetch_at()
-                elif self.cycle % 8 == 5: self._fetch_pt_lo()
-                elif self.cycle % 8 == 7: self._fetch_pt_hi()
+                elif phase == 1: self._fetch_nt()
+                elif phase == 3: self._fetch_at()
+                elif phase == 5: self._fetch_pt_lo()
+                elif phase == 7: self._fetch_pt_hi()
             
-            if self.cycle == 256:
+            # Scrolling logic
+            if cycle == 256:
                 self._increment_scroll_y()
-            elif self.cycle == 257:
+            elif cycle == 257:
                 self._reset_scroll_x()
             
-            # Pre-fetch for next scanline
-            if self.cycle > 256 and self.cycle <= 336:
-                 if self.cycle % 8 == 0:
+            # Pre-fetch for next scanline (321 to 336)
+            if 321 <= cycle <= 336:
+                 self._update_shifters()
+                 phase = cycle & 0x07
+                 if phase == 0:
                     self._load_shifters()
                     self._increment_scroll_x()
-                 elif self.cycle % 8 == 1: self._fetch_nt()
-                 elif self.cycle % 8 == 3: self._fetch_at()
-                 elif self.cycle % 8 == 5: self._fetch_pt_lo()
-                 elif self.cycle % 8 == 7: self._fetch_pt_hi()
+                 elif phase == 1: self._fetch_nt()
+                 elif phase == 3: self._fetch_at()
+                 elif phase == 5: self._fetch_pt_lo()
+                 elif phase == 7: self._fetch_pt_hi()
             
-            if self.scanline == -1 and self.cycle >= 280 and self.cycle <= 304:
+            # Pre-render scanline specific logic
+            if scanline == -1 and 280 <= cycle <= 304:
                 self._reset_scroll_y()
 
+        # Update Cycle/Scanline
         self.cycle += 1
+        self.total_cycles += 1
+        
         if self.cycle >= 341:
             self.cycle = 0
             self.scanline += 1
-            if self.scanline == 241:
+            scanline = self.scanline # Update local
+            
+            if scanline == 241:
                 self.ppu_status |= 0x80
                 if self.ppu_ctrl & 0x80: self.nmi = True
-            if self.scanline >= 261:
-                self.scanline = 0
+            elif scanline >= 261:
+                self.scanline = -1
+                self.frame_count += 1
                 self.ppu_status &= ~0xC0 # Clear VBlank and Sprite 0 Hit
                 self.nmi = False
                 self.is_odd_frame = not self.is_odd_frame
+                # Odd frame cycle skip
+                if self.scanline == -1 and (self.ppu_mask & 0x18) and self.is_odd_frame:
+                    self.cycle = 1
+                    self.total_cycles += 1
+
+    def run_to(self, target_total_cycles: int):
+        # Local refs for hot loop optimization
+        clock = self.clock
+        while self.total_cycles < target_total_cycles:
+            clock()
+
+    def _render_scanline_fast(self):
+        # Scanline batching is currently disabled for correctness.
+        # It will be re-implemented safely in a future update.
+        pass
 
     def _render_pixel(self):
+        ppu_mask = self.ppu_mask
+        cycle = self.cycle
         # Background pixel
         bg_pixel = 0
         bg_palette = 0
-        if self.ppu_mask & 0x08:
-            if self.cycle > 8 or (self.ppu_mask & 0x02):
+        if ppu_mask & 0x08:
+            if cycle > 8 or (ppu_mask & 0x02):
                 bit_mux = 0x8000 >> self.fine_x
                 p0_pixel = (self.bg_shifter_tile_lo & bit_mux) > 0
                 p1_pixel = (self.bg_shifter_tile_hi & bit_mux) > 0
@@ -141,31 +169,35 @@ class PPU:
         fg_priority = 0
         sprite_zero_hit = False
         
-        if self.ppu_mask & 0x10: # Sprite rendering enabled
-            if self.cycle > 8 or (self.ppu_mask & 0x04):
-                for i in range(self.sprite_count):
-                    if self.sprite_x_counters[i] == 0:
-                        pixel_lo = (self.sprite_shifter_pattern_lo[i] & 0x80) > 0
-                        pixel_hi = (self.sprite_shifter_pattern_hi[i] & 0x80) > 0
+        if ppu_mask & 0x10: # Sprite rendering enabled
+            if cycle > 8 or (ppu_mask & 0x04):
+                sprite_count = self.sprite_count
+                sprite_shifter_pattern_lo = self.sprite_shifter_pattern_lo
+                sprite_shifter_pattern_hi = self.sprite_shifter_pattern_hi
+                sprite_x_counters = self.sprite_x_counters
+                sprite_attribs = self.sprite_attribs
+                for i in range(sprite_count):
+                    if sprite_x_counters[i] == 0:
+                        pixel_lo = (sprite_shifter_pattern_lo[i] & 0x80) > 0
+                        pixel_hi = (sprite_shifter_pattern_hi[i] & 0x80) > 0
                         fg_pixel = (pixel_hi << 1) | pixel_lo
-                        fg_palette = (self.sprite_attribs[i] & 0x03) + 0x04
-                        fg_priority = (self.sprite_attribs[i] & 0x20) == 0 # 0: in front, 1: behind
                         
                         if fg_pixel != 0:
+                            attr = sprite_attribs[i]
+                            fg_palette = (attr & 0x03) + 0x04
+                            fg_priority = (attr & 0x20) == 0 # 0: in front, 1: behind
                             if i == 0 and self.sprite_zero_hit_possible:
                                 sprite_zero_hit = True
                             break
 
         # Priority Multiplexer
-        pixel = 0
         palette = 0
-        if bg_pixel == 0 and fg_pixel == 0:
-            pixel = 0
-            palette = 0
-        elif bg_pixel == 0 and fg_pixel > 0:
-            pixel = fg_pixel
-            palette = fg_palette
-        elif bg_pixel > 0 and fg_pixel == 0:
+        pixel = 0
+        if bg_pixel == 0:
+            if fg_pixel > 0:
+                pixel = fg_pixel
+                palette = fg_palette
+        elif fg_pixel == 0:
             pixel = bg_pixel
             palette = bg_palette
         else: # Both opaque
@@ -176,31 +208,46 @@ class PPU:
                 pixel = bg_pixel
                 palette = bg_palette
             
-            if sprite_zero_hit and (self.ppu_mask & 0x18) == 0x18:
-                if self.cycle >= 1 and self.cycle <= 255:
+            if sprite_zero_hit and (ppu_mask & 0x18) == 0x18:
+                if cycle >= 1 and cycle <= 255:
                     if not (self.ppu_status & 0x40):
                          self.ppu_status |= 0x40
         
-        color_idx = self.ppu_read(0x3F00 + (palette << 2) + pixel)
-        if self.ppu_mask & 0x01: # Grayscale
+        # Optimized palette access
+        palette_vram = self.palette_vram
+        if pixel == 0:
+            color_idx = palette_vram[0]
+        else:
+            pal_addr = (palette << 2) + pixel
+            if (pal_addr & 0x13) == 0x10: pal_addr &= ~0x10
+            color_idx = palette_vram[pal_addr & 0x1F]
+            
+        if ppu_mask & 0x01: # Grayscale
             color_idx &= 0x30
             
-        self.pixels[self.scanline * 256 + (self.cycle - 1)] = color_idx
+        pixel_idx = self.scanline * 256 + (cycle - 1)
+        if 0 <= pixel_idx < 61440:
+            self.pixels[pixel_idx] = color_idx
 
     def _update_shifters(self):
-        if self.ppu_mask & 0x08:
+        ppu_mask = self.ppu_mask
+        if ppu_mask & 0x08:
             self.bg_shifter_tile_lo = (self.bg_shifter_tile_lo << 1) & 0xFFFF
             self.bg_shifter_tile_hi = (self.bg_shifter_tile_hi << 1) & 0xFFFF
             self.bg_shifter_attrib_lo = (self.bg_shifter_attrib_lo << 1) & 0xFFFF
             self.bg_shifter_attrib_hi = (self.bg_shifter_attrib_hi << 1) & 0xFFFF
 
-        if self.ppu_mask & 0x10 and self.cycle >= 1 and self.cycle <= 256:
-            for i in range(self.sprite_count):
-                if self.sprite_x_counters[i] > 0:
-                    self.sprite_x_counters[i] -= 1
+        if ppu_mask & 0x10 and 1 <= self.cycle <= 256:
+            sprite_count = self.sprite_count
+            sprite_x_counters = self.sprite_x_counters
+            sprite_shifter_pattern_lo = self.sprite_shifter_pattern_lo
+            sprite_shifter_pattern_hi = self.sprite_shifter_pattern_hi
+            for i in range(sprite_count):
+                if sprite_x_counters[i] > 0:
+                    sprite_x_counters[i] -= 1
                 else:
-                    self.sprite_shifter_pattern_lo[i] = (self.sprite_shifter_pattern_lo[i] << 1) & 0xFF
-                    self.sprite_shifter_pattern_hi[i] = (self.sprite_shifter_pattern_hi[i] << 1) & 0xFF
+                    sprite_shifter_pattern_lo[i] = (sprite_shifter_pattern_lo[i] << 1) & 0xFF
+                    sprite_shifter_pattern_hi[i] = (sprite_shifter_pattern_hi[i] << 1) & 0xFF
 
     def _load_shifters(self):
         self.bg_shifter_tile_lo = (self.bg_shifter_tile_lo & 0xFF00) | self.bg_next_tile_lsb
@@ -336,7 +383,7 @@ class PPU:
         elif addr <= 0x3EFF: return self.vram[self._map_nt_addr(addr)]
         elif addr <= 0x3FFF:
             addr &= 0x001F
-            if addr in (0x10, 0x14, 0x18, 0x1C): addr -= 0x10
+            if (addr & 0x13) == 0x10: addr &= ~0x10
             return self.palette_vram[addr]
         return 0
 
@@ -347,8 +394,8 @@ class PPU:
         elif addr <= 0x3EFF: self.vram[self._map_nt_addr(addr)] = data & 0xFF
         elif addr <= 0x3FFF:
             addr &= 0x001F
-            if addr in (0x10, 0x14, 0x18, 0x1C): addr -= 0x10
-            self.palette_vram[addr] = data & 0xFF
+            if (addr & 0x13) == 0x10: addr &= ~0x10
+            self.palette_vram[addr] = data & 0x3F
 
     def _map_nt_addr(self, addr: int) -> int:
         addr &= 0x0FFF
