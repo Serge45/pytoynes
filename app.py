@@ -53,46 +53,14 @@ def main():
     
     font = pygame.font.SysFont(None, 16)
     clock = pygame.time.Clock()
-    cpu_running = True
     frame_count = 0
     debug_mode = False
     emu_fps = 0.0
     last_emu_fps_time = pygame.time.get_ticks()
     last_ppu_frame_count = 0
-
-    def cpu_thread_body():
-        nonlocal cpu
-        total_cpu_cycles = 0
-        FRAME_DURATION_S = 1.0 / 60.0988  # NTSC: ~16.639 ms per frame
-
-        while cpu_running:
-            frame_start = time.perf_counter()
-            target_frame = bus.ppu.frame_count + 1
-
-            # Run one full NES frame worth of CPU/PPU cycles
-            while bus.ppu.frame_count < target_frame and cpu_running:
-                cycles = cpu.clock()
-                total_cpu_cycles += cycles
-                # Sync PPU only at instruction boundaries (cpu.cycle==0 means
-                # the instruction just finished; next call starts a new one)
-                if cpu.cycle == 0:
-                    bus.ppu.run_to(total_cpu_cycles * 3)
-                if bus.ppu.nmi:
-                    bus.ppu.nmi = False
-                    cpu.nmi()
-
-            # Sleep for the remaining frame budget to avoid burning 100% CPU
-            elapsed = time.perf_counter() - frame_start
-            sleep_s = FRAME_DURATION_S - elapsed
-            if sleep_s > 0:
-                time.sleep(sleep_s)
-
-    cpu_thread = Thread(target=cpu_thread_body)
-    cpu_thread.start()
+    total_cpu_cycles = 0
 
     key_map = {
-
-
         pygame.K_z: BUTTON_A,
         pygame.K_x: BUTTON_B,
         pygame.K_RSHIFT: BUTTON_SELECT,
@@ -103,31 +71,45 @@ def main():
         pygame.K_RIGHT: BUTTON_RIGHT
     }
 
-    while True:
-        events = pygame.event.get()
-
-        for e in events:
+    running = True
+    while running:
+        # 1. Handle Events
+        for e in pygame.event.get():
             if e.type == pygame.QUIT:
-                cpu_running = False
-                cpu_thread.join()
-                pygame.quit()
-                return
-            if e.type == pygame.KEYDOWN:
+                running = False
+            elif e.type == pygame.KEYDOWN:
                 if e.unicode == 'd':
                     print(f'0x0002: {bus.ram[0x0002]:04x}, 0x0003: {bus.ram[0x0003]:04x}')
                 elif e.unicode == 'q':
-                    cpu_running = False
-                    cpu_thread.join()
-                    pygame.quit()
-                    return
+                    running = False
                 elif e.key == pygame.K_TAB:
                     debug_mode = not debug_mode
                 if e.key in key_map:
                     bus.controllers[0].set_button(key_map[e.key], True)
-            if e.type == pygame.KEYUP:
+            elif e.type == pygame.KEYUP:
                 if e.key in key_map:
                     bus.controllers[0].set_button(key_map[e.key], False)
 
+        # 2. Run Emulation for one frame
+        # NTSC: ~29780 cycles per frame
+        cycles_this_frame = 0
+        while cycles_this_frame < 29780:
+            # Run CPU in small batches to balance synchronization and overhead
+            batch_cycles = 0
+            while batch_cycles < 100:
+                cycles = cpu.clock()
+                batch_cycles += cycles
+                cycles_this_frame += cycles
+                total_cpu_cycles += cycles
+            
+            # Sync PPU (3 PPU cycles per 1 CPU cycle)
+            bus.ppu.run_to(total_cpu_cycles * 3)
+            
+            if bus.ppu.nmi:
+                bus.ppu.nmi = False
+                cpu.nmi()
+
+        # 3. Render
         now = pygame.time.get_ticks()
         elapsed_ms = now - last_emu_fps_time
         if elapsed_ms >= 1000:
@@ -151,6 +133,8 @@ def main():
         pygame.display.flip()
         clock.tick(60)
         frame_count += 1
+
+    pygame.quit()
 
 if __name__ == '__main__':
     main()

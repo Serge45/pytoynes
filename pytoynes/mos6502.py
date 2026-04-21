@@ -318,22 +318,25 @@ class MOS6502:
     def write(self, addr: int, data: int):
         self.bus.write(addr, data)
 
-    def clock(self):
+    def clock(self) -> int:
         if self.jammed: return 1
-        if self.cycle == 0:
-            self.opcode = self.bus.read(self.pc)
-            if self.on_opcode_loaded: self.on_opcode_loaded()
-            self.pc += 1
-            entry = self.opcode_table[self.opcode]
-            if entry is None:
-                self.jammed = True
-                return 1
-            name, comp, addr, cycles = entry
-            self.cycle += cycles
-            extra1, extra2 = addr(), comp()
-            self.cycle += extra1 & extra2
-        self.cycle -= 1
-        return 1
+        
+        self.opcode = self.bus.read(self.pc)
+        if self.on_opcode_loaded: self.on_opcode_loaded()
+        self.pc += 1
+        
+        entry = self.opcode_table[self.opcode]
+        if entry is None:
+            self.jammed = True
+            return 1
+            
+        name, comp, addr, cycles = entry
+        # addr() and comp() return 1 if an extra cycle might be needed (e.g. page cross)
+        extra1 = addr()
+        extra2 = comp()
+        
+        total_cycles = cycles + (extra1 & extra2)
+        return total_cycles
 
     def fetch(self):
         entry = self.opcode_table[self.opcode]

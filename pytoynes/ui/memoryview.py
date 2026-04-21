@@ -92,6 +92,8 @@ def draw_pattern_table(bus: Bus, table_idx: int, rect: pygame.Rect, dst_surf: py
                 low_byte = ppu.ppu_read(base_addr + py)
                 high_byte = ppu.ppu_read(base_addr + py + 8)
                 
+                # Vectorized bit extraction for 8 pixels at once?
+                # For now just keep the loop but optimized
                 for px in range(8):
                     bit_pos = 7 - px
                     pixel_val = (((high_byte >> bit_pos) & 0x01) << 1) | ((low_byte >> bit_pos) & 0x01)
@@ -101,21 +103,18 @@ def draw_pattern_table(bus: Bus, table_idx: int, rect: pygame.Rect, dst_surf: py
     rgb_array = colors[pixels]
     
     # Create surface from RGB array
-    temp_surf = pygame.surfarray.make_surface(np.transpose(rgb_array, (1, 0, 2)))
-    
-    scaled_surf = pygame.transform.scale(temp_surf, (rect.width, rect.height))
-    dst_surf.blit(scaled_surf, (rect.x, rect.y))
+    temp_surf = pygame.surfarray.make_surface(rgb_array.transpose(1, 0, 2))
+    pygame.transform.scale(temp_surf, (rect.width, rect.height), dst_surf.subsurface(rect))
 
 def draw_ppu_screen(bus: Bus, rect: pygame.Rect, dst_surf: pygame.Surface):
-    # Optimized rendering using surfarray
-    ppu_pixels = np.frombuffer(bus.ppu.pixels, dtype=np.uint8).reshape((240, 256))
-    
-    # Map pixel indices to RGB values
-    rgb_surf = NES_PALETTE[ppu_pixels]
+    # Map pixel indices to RGB values using vectorized NumPy indexing
+    rgb_data = NES_PALETTE[bus.ppu.pixels]
     
     # Create surface from RGB array
-    temp_surf = pygame.surfarray.make_surface(np.transpose(rgb_surf, (1, 0, 2)))
+    # transpose(1, 0, 2) is needed because pygame surfarray uses (width, height)
+    temp_surf = pygame.surfarray.make_surface(rgb_data.transpose(1, 0, 2))
     
+    # Fast scaling and blitting
     scaled_surf = pygame.transform.scale(temp_surf, (rect.width, rect.height))
     dst_surf.blit(scaled_surf, (rect.x, rect.y))
 

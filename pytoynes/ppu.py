@@ -1,4 +1,5 @@
 import array
+import numpy as np
 from .cartridge import Cartridge
 from .rom import MirrorMode
 from typing import Optional
@@ -13,9 +14,17 @@ class PPU:
         self.palette_vram = array.array('B', bytearray(32))
         self.oam_vram = array.array('B', bytearray(256))
         
-        # Output pixels (256x240)
-        self.pixels = array.array('B', bytearray(256 * 240))
+        # Output pixels (256x240 NumPy array for fast vectorized rendering)
+        self.pixels = np.zeros((240, 256), dtype=np.uint8)
         
+        # Rendering buffers for _render_scanline_fast (pre-allocated for speed)
+        self._bg_pixels = np.zeros(256, dtype=np.uint8)
+        self._bg_palettes = np.zeros(256, dtype=np.uint8)
+        self._fg_pixels = np.zeros(256, dtype=np.uint8)
+        self._fg_palettes = np.zeros(256, dtype=np.uint8)
+        self._fg_priorities = np.zeros(256, dtype=bool)
+        self._sprite0_possible = np.zeros(256, dtype=bool)
+
         # PPU Registers
         self.ppu_ctrl = 0
         self.ppu_mask = 0
@@ -171,12 +180,14 @@ class PPU:
         ppu_mask = self.ppu_mask
         scanline = self.scanline
         
-        # 1. Background Rendering
-        bg_pixels = [0] * 256
-        bg_palettes = [0] * 256
+        # 1. Background Rendering (Partially vectorized)
+        self._bg_pixels.fill(0)
+        self._bg_palettes.fill(0)
         
         if ppu_mask & 0x08:
-            v = self.v
+            # v at cycle 0 is already incremented twice by pre-fetch.
+            # Synchronize horizontal bits with latch 't' to get correct start position.
+            v = (self.v & ~0x041F) | (self.t & 0x041F)
             fine_x = self.fine_x
             ppu_ctrl = self.ppu_ctrl
             table = (ppu_ctrl >> 4) & 0x01
@@ -184,7 +195,6 @@ class PPU:
             
             # Render 33 tiles to cover 256 pixels with fine_x shift
             for t in range(33):
-                # Fetch data for this tile
                 nt_addr = 0x2000 | (v & 0x0FFF)
                 tile_id = self.ppu_read(nt_addr)
                 
@@ -205,26 +215,22 @@ class PPU:
                         if not (pixel_x < 8 and not (ppu_mask & 0x02)):
                             bit_pos = 7 - p
                             pixel = (((msb >> bit_pos) & 0x01) << 1) | ((lsb >> bit_pos) & 0x01)
-                            bg_pixels[pixel_x] = pixel
-                            bg_palettes[pixel_x] = pal_idx
+                            self._bg_pixels[pixel_x] = pixel
+                            self._bg_palettes[pixel_x] = pal_idx
 
-                # Horizontal increment
-                if (v & 0x001F) == 31:
-                    v = (v & ~0x001F) ^ 0x0400
-                else:
-                    v += 1
+                if (v & 0x001F) == 31: v = (v & ~0x001F) ^ 0x0400
+                else: v += 1
         
         # 2. Sprite Rendering
-        fg_pixels = [0] * 256
-        fg_palettes = [0] * 256
-        fg_priorities = [0] * 256
-        sprite0_hit_possible = [False] * 256
+        self._fg_pixels.fill(0)
+        self._fg_palettes.fill(0)
+        self._fg_priorities.fill(0)
+        self._sprite0_possible.fill(0)
         
         if ppu_mask & 0x10:
             self._evaluate_sprites()
             self._fetch_sprite_data()
             
-            # Render sprites in reverse order so lower indices (higher priority) overwrite
             for i in range(self.sprite_count - 1, -1, -1):
                 attr = self.sprite_attribs[i]
                 x = self.sprite_x_counters[i]
@@ -232,71 +238,61 @@ class PPU:
                 msb = self.sprite_shifter_pattern_hi[i]
                 
                 pal = (attr & 0x03) + 0x04
-                priority = (attr & 0x20) == 0 # True if in front of BG
+                priority = (attr & 0x20) == 0
                 
                 for p in range(8):
-                    pixel_x = x + p + 1 # Sprites are delayed by 1 pixel on NES
+                    pixel_x = x + p + 1
                     if pixel_x < 256:
                         if not (pixel_x < 8 and not (ppu_mask & 0x04)):
                             bit_pos = 7 - p
                             pixel = (((msb >> bit_pos) & 0x01) << 1) | ((lsb >> bit_pos) & 0x01)
                             if pixel != 0:
-                                fg_pixels[pixel_x] = pixel
-                                fg_palettes[pixel_x] = pal
-                                fg_priorities[pixel_x] = priority
+                                self._fg_pixels[pixel_x] = pixel
+                                self._fg_palettes[pixel_x] = pal
+                                self._fg_priorities[pixel_x] = priority
                                 if i == 0 and self.sprite_zero_hit_possible:
-                                    sprite0_hit_possible[pixel_x] = True
+                                    self._sprite0_possible[pixel_x] = True
 
-        # 3. Combine and Apply to Pixel Buffer
-        start_idx = scanline * 256
-        palette_vram = self.palette_vram
-        backdrop = palette_vram[0]
-        is_grayscale = (ppu_mask & 0x01) != 0
+        # 3. Combine and Apply to Pixel Buffer (Vectorized with NumPy)
+        bg_opaque = self._bg_pixels > 0
+        fg_opaque = self._fg_pixels > 0
         
-        for i in range(256):
-            bg_p = bg_pixels[i]
-            fg_p = fg_pixels[i]
-            
-            pixel = 0
-            palette = 0
-            
-            if bg_p == 0:
-                if fg_p > 0:
-                    pixel = fg_p
-                    palette = fg_palettes[i]
-            elif fg_p == 0:
-                pixel = bg_p
-                palette = bg_palettes[i]
-            else:
-                # Both non-zero: Sprite 0 Hit
-                if sprite0_hit_possible[i] and (ppu_mask & 0x18) == 0x18:
-                    if i < 255:
-                        self.ppu_status |= 0x40
-                
-                if fg_priorities[i]:
-                    pixel = fg_p
-                    palette = fg_palettes[i]
-                else:
-                    pixel = bg_p
-                    palette = bg_palettes[i]
+        # Sprite 0 Hit
+        if (ppu_mask & 0x18) == 0x18 and self.sprite_zero_hit_possible:
+            hit_mask = bg_opaque & fg_opaque & self._sprite0_possible
+            if hit_mask[:255].any(): self.ppu_status |= 0x40
 
-            if pixel == 0:
-                color_idx = backdrop
-            else:
-                pal_addr = (palette << 2) + pixel
-                if (pal_addr & 0x13) == 0x10: pal_addr &= ~0x10
-                color_idx = palette_vram[pal_addr & 0x1F]
+        # Pixel/Palette Selection
+        final_pixel = np.zeros(256, dtype=np.uint8)
+        final_palette = np.zeros(256, dtype=np.uint8)
+        
+        final_pixel[bg_opaque] = self._bg_pixels[bg_opaque]
+        final_palette[bg_opaque] = self._bg_palettes[bg_opaque]
+        
+        # FG overwrites if FG is opaque AND (BG is transparent OR FG has priority)
+        fg_overwrites = fg_opaque & (~bg_opaque | self._fg_priorities)
+        final_pixel[fg_overwrites] = self._fg_pixels[fg_overwrites]
+        final_palette[fg_overwrites] = self._fg_palettes[fg_overwrites]
 
-            if is_grayscale: color_idx &= 0x30
-            self.pixels[start_idx + i] = color_idx
+        # Backdrop
+        out_pixels = np.full(256, self.palette_vram[0], dtype=np.uint8)
+        
+        # Palette lookup
+        mask = final_pixel > 0
+        if mask.any():
+            pal_indices = (final_palette[mask].astype(np.uint16) << 2) + final_pixel[mask]
+            mirror_mask = (pal_indices & 0x13) == 0x10
+            pal_indices[mirror_mask] &= 0xFFEF # Equivalent to ~0x10 for uint16
+            pal_vram_np = np.frombuffer(self.palette_vram, dtype=np.uint8)
+            out_pixels[mask] = pal_vram_np[pal_indices & 0x1F]
+
+        if ppu_mask & 0x01: out_pixels &= 0x30
+        self.pixels[scanline] = out_pixels
 
         # 4. Update State (Scrolls)
         if ppu_mask & 0x18:
-            # Vertical increment (at cycle 256)
             self._increment_scroll_y()
-            # Reset scroll X (at cycle 257)
             self._reset_scroll_x()
-            # Two horizontal increments (at cycles 328, 336)
             self._increment_scroll_x()
             self._increment_scroll_x()
 
@@ -379,9 +375,7 @@ class PPU:
         if ppu_mask & 0x01: # Grayscale
             color_idx &= 0x30
             
-        pixel_idx = self.scanline * 256 + (cycle - 1)
-        if 0 <= pixel_idx < 61440:
-            self.pixels[pixel_idx] = color_idx
+        self.pixels[self.scanline, self.cycle - 1] = color_idx
 
     def _update_shifters(self):
         ppu_mask = self.ppu_mask
@@ -464,7 +458,7 @@ class PPU:
         sprite_size = 16 if (self.ppu_ctrl & 0x20) else 8
         for i in range(64):
             y = self.oam_vram[i * 4]
-            diff = self.scanline - y
+            diff = self.scanline - (y + 1)
             if diff >= 0 and diff < sprite_size:
                 if self.sprite_count < 8:
                     if i == 0: self.sprite_zero_hit_possible = True
@@ -481,7 +475,7 @@ class PPU:
         for i in range(self.sprite_count):
             y = self.secondary_oam[i * 4]; tile_id = self.secondary_oam[i * 4 + 1]
             attr = self.secondary_oam[i * 4 + 2]; x = self.secondary_oam[i * 4 + 3]
-            row = self.scanline - y
+            row = self.scanline - (y + 1)
             if attr & 0x80: row = (sprite_size - 1) - row
             if sprite_size == 8: addr = table * 0x1000 + tile_id * 16 + row
             else:
