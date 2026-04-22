@@ -25,7 +25,6 @@ def main():
         return
 
     bus.cartridge = cartridge
-    bus.ppu.connect_cartridge(cartridge)
     bus.ppu.ppu_mask = 0x1E # Enable BG and Sprites
     
     # Initialize CPU
@@ -91,20 +90,18 @@ def main():
                     bus.controllers[0].set_button(key_map[e.key], False)
 
         # 2. Run Emulation for one frame
-        # NTSC: ~29780 cycles per frame
+        # NTSC: ~29780 cycles per frame, sync PPU every ~scanline (113 CPU cycles)
         cycles_this_frame = 0
         while cycles_this_frame < 29780:
-            # Run CPU in small batches to balance synchronization and overhead
             batch_cycles = 0
-            while batch_cycles < 100:
+            while batch_cycles < 113:
                 cycles = cpu.clock()
                 batch_cycles += cycles
-                cycles_this_frame += cycles
                 total_cpu_cycles += cycles
-            
-            # Sync PPU (3 PPU cycles per 1 CPU cycle)
+            cycles_this_frame += batch_cycles
+
             bus.ppu.run_to(total_cpu_cycles * 3)
-            
+
             if bus.ppu.nmi:
                 bus.ppu.nmi = False
                 cpu.nmi()

@@ -4,6 +4,13 @@ from .cartridge import Cartridge
 from .rom import MirrorMode
 from typing import Optional
 
+_TILE_DECODE = [None] * 65536
+for _lo in range(256):
+    for _hi in range(256):
+        _TILE_DECODE[_lo | (_hi << 8)] = bytes(
+            ((_hi >> (7 - _p)) & 1) << 1 | ((_lo >> (7 - _p)) & 1) for _p in range(8)
+        )
+
 class PPU:
     def __init__(self):
         self.cartridge: Optional[Cartridge] = None
@@ -179,79 +186,83 @@ class PPU:
     def _render_scanline_fast(self):
         ppu_mask = self.ppu_mask
         scanline = self.scanline
-        
-        # 1. Background Rendering (Partially vectorized)
-        self._bg_pixels.fill(0)
-        self._bg_palettes.fill(0)
-        
+        chr_memory = self._chr_memory
+        vram = self.vram
+        map_nt = self._map_nt_addr
+        bg_pixels = self._bg_pixels
+        bg_palettes = self._bg_palettes
+        tile_decode = _TILE_DECODE
+
+        # 1. Background Rendering
+        bg_pixels.fill(0)
+        bg_palettes.fill(0)
+
         if ppu_mask & 0x08:
-            # v at cycle 0 is already incremented twice by pre-fetch.
-            # Synchronize horizontal bits with latch 't' to get correct start position.
             v = (self.v & ~0x041F) | (self.t & 0x041F)
             fine_x = self.fine_x
-            ppu_ctrl = self.ppu_ctrl
-            table = (ppu_ctrl >> 4) & 0x01
+            table = (self.ppu_ctrl >> 4) & 0x01
             fine_y = (v >> 12) & 0x07
-            
-            # Render 33 tiles to cover 256 pixels with fine_x shift
+            left_clip = not (ppu_mask & 0x02)
+
             for t in range(33):
-                nt_addr = 0x2000 | (v & 0x0FFF)
-                tile_id = self.ppu_read(nt_addr)
-                
-                at_addr = 0x23C0 | (v & 0x0C00) | ((v >> 4) & 0x38) | ((v >> 2) & 0x07)
-                attr = self.ppu_read(at_addr)
+                tile_id = vram[map_nt(0x2000 | (v & 0x0FFF))]
+                attr = vram[map_nt(0x23C0 | (v & 0x0C00) | ((v >> 4) & 0x38) | ((v >> 2) & 0x07))]
                 if (v >> 6) & 0x01: attr >>= 4
                 if (v >> 1) & 0x01: attr >>= 2
                 pal_idx = attr & 0x03
-                
+
                 pt_addr = (table << 12) | (tile_id << 4) | fine_y
-                lsb = self.ppu_read(pt_addr)
-                msb = self.ppu_read(pt_addr + 8)
-                
-                # Render 8 pixels of this tile
+                decoded = tile_decode[chr_memory[pt_addr] | (chr_memory[pt_addr + 8] << 8)]
+
+                base_x = t * 8 - fine_x
                 for p in range(8):
-                    pixel_x = t * 8 + p - fine_x
+                    pixel_x = base_x + p
                     if 0 <= pixel_x < 256:
-                        if not (pixel_x < 8 and not (ppu_mask & 0x02)):
-                            bit_pos = 7 - p
-                            pixel = (((msb >> bit_pos) & 0x01) << 1) | ((lsb >> bit_pos) & 0x01)
-                            self._bg_pixels[pixel_x] = pixel
-                            self._bg_palettes[pixel_x] = pal_idx
+                        if not (left_clip and pixel_x < 8):
+                            px = decoded[p]
+                            if px:
+                                bg_pixels[pixel_x] = px
+                                bg_palettes[pixel_x] = pal_idx
 
                 if (v & 0x001F) == 31: v = (v & ~0x001F) ^ 0x0400
                 else: v += 1
-        
+
         # 2. Sprite Rendering
-        self._fg_pixels.fill(0)
-        self._fg_palettes.fill(0)
-        self._fg_priorities.fill(0)
-        self._sprite0_possible.fill(0)
-        
+        fg_pixels = self._fg_pixels
+        fg_palettes = self._fg_palettes
+        fg_priorities = self._fg_priorities
+        sprite0_possible = self._sprite0_possible
+        fg_pixels.fill(0)
+        fg_palettes.fill(0)
+        fg_priorities.fill(0)
+        sprite0_possible.fill(0)
+
         if ppu_mask & 0x10:
             self._evaluate_sprites()
             self._fetch_sprite_data()
-            
+            left_clip_spr = not (ppu_mask & 0x04)
+
             for i in range(self.sprite_count - 1, -1, -1):
                 attr = self.sprite_attribs[i]
                 x = self.sprite_x_counters[i]
-                lsb = self.sprite_shifter_pattern_lo[i]
-                msb = self.sprite_shifter_pattern_hi[i]
-                
+                decoded = tile_decode[
+                    self.sprite_shifter_pattern_lo[i] | (self.sprite_shifter_pattern_hi[i] << 8)
+                ]
                 pal = (attr & 0x03) + 0x04
                 priority = (attr & 0x20) == 0
-                
+                is_sprite0 = i == 0 and self.sprite_zero_hit_possible
+
                 for p in range(8):
                     pixel_x = x + p + 1
                     if pixel_x < 256:
-                        if not (pixel_x < 8 and not (ppu_mask & 0x04)):
-                            bit_pos = 7 - p
-                            pixel = (((msb >> bit_pos) & 0x01) << 1) | ((lsb >> bit_pos) & 0x01)
-                            if pixel != 0:
-                                self._fg_pixels[pixel_x] = pixel
-                                self._fg_palettes[pixel_x] = pal
-                                self._fg_priorities[pixel_x] = priority
-                                if i == 0 and self.sprite_zero_hit_possible:
-                                    self._sprite0_possible[pixel_x] = True
+                        if not (left_clip_spr and pixel_x < 8):
+                            px = decoded[p]
+                            if px:
+                                fg_pixels[pixel_x] = px
+                                fg_palettes[pixel_x] = pal
+                                fg_priorities[pixel_x] = priority
+                                if is_sprite0:
+                                    sprite0_possible[pixel_x] = True
 
         # 3. Combine and Apply to Pixel Buffer (Vectorized with NumPy)
         bg_opaque = self._bg_pixels > 0
@@ -523,24 +534,28 @@ class PPU:
         bit_pos = 7 - x
         return (((high_byte >> bit_pos) & 0x01) << 1) | ((low_byte >> bit_pos) & 0x01)
 
-    def connect_cartridge(self, cartridge: Cartridge): self.cartridge = cartridge
+    def connect_cartridge(self, cartridge: Cartridge):
+        self.cartridge = cartridge
+        self._chr_memory = cartridge.chr_memory
 
     def ppu_read(self, addr: int) -> int:
         addr &= 0x3FFF
-        if addr <= 0x1FFF: return self.cartridge.ppu_read(addr) if self.cartridge else 0
-        elif addr <= 0x3EFF: return self.vram[self._map_nt_addr(addr)]
-        elif addr <= 0x3FFF:
+        if addr <= 0x1FFF:
+            return self._chr_memory[addr]
+        elif addr <= 0x3EFF:
+            return self.vram[self._map_nt_addr(addr)]
+        else:
             addr &= 0x001F
             if (addr & 0x13) == 0x10: addr &= ~0x10
             return self.palette_vram[addr]
-        return 0
 
     def ppu_write(self, addr: int, data: int):
         addr &= 0x3FFF
         if addr <= 0x1FFF:
-            if self.cartridge: self.cartridge.ppu_write(addr, data)
-        elif addr <= 0x3EFF: self.vram[self._map_nt_addr(addr)] = data & 0xFF
-        elif addr <= 0x3FFF:
+            self._chr_memory[addr] = data
+        elif addr <= 0x3EFF:
+            self.vram[self._map_nt_addr(addr)] = data & 0xFF
+        else:
             addr &= 0x001F
             if (addr & 0x13) == 0x10: addr &= ~0x10
             self.palette_vram[addr] = data & 0x3F

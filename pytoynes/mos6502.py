@@ -26,11 +26,10 @@ class MOS6502:
         self.abs_addr = 0
         self.rel_addr = 0
         self.opcode = 0
-        self.status = {s: 0 for s in Status}
-        self._set_status(Status.U, True)
-        self._set_status(Status.I, True)
+        self.p = Status.U | Status.I
         self.jammed = False
         self.on_opcode_loaded = None
+        self._fetch_from_mem = True
         
         # Optimized opcode dispatch table
         self.opcode_table = [None] * 256
@@ -294,29 +293,23 @@ class MOS6502:
         for op, data in lookup.items():
             self.opcode_table[op] = data
 
+    @property
+    def status(self):
+        return {s: 1 if (self.p & s) else 0 for s in Status}
+
     def __repr__(self):
         op_data = self.opcode_table[self.opcode]
         op_name = op_data[0] if op_data else "???"
         return f'PC: {hex(self.pc).upper()}, OP: {op_name}, A: {self.a}, X: {self.x}, Y: {self.y}'
 
     def all_status_as_int(self) -> int:
-        result = 0
-        for f, v in self.status.items():
-            if v > 0: result |= f
-        return result
+        return self.p
 
     def restore_all_status_from_int(self, status_int: int):
-        for f in Status:
-            self._set_status(f, (status_int & f) > 0)
+        self.p = status_int & 0xFF
 
     def connect(self, bus: Bus):
         self.bus = bus
-
-    def read(self, addr: int):
-        return self.bus.read(addr)
-
-    def write(self, addr: int, data: int):
-        self.bus.write(addr, data)
 
     def clock(self) -> int:
         if self.jammed: return 1
@@ -331,7 +324,7 @@ class MOS6502:
             return 1
             
         name, comp, addr, cycles = entry
-        # addr() and comp() return 1 if an extra cycle might be needed (e.g. page cross)
+        self._fetch_from_mem = addr != self._addr_imp
         extra1 = addr()
         extra2 = comp()
         
@@ -339,8 +332,7 @@ class MOS6502:
         return total_cycles
 
     def fetch(self):
-        entry = self.opcode_table[self.opcode]
-        if entry and entry[2] != self._addr_imp:
+        if self._fetch_from_mem:
             self.fetched = self.bus.read(self.abs_addr)
         return self.fetched
 
@@ -349,12 +341,10 @@ class MOS6502:
         self.x = 0
         self.y = 0
         self.stkp = 0xFD
-        for s in self.status: self._set_status(s, False)
-        self._set_status(Status.U, True)
-        self._set_status(Status.I, True)
+        self.p = Status.U | Status.I
         self.abs_addr = 0xFFFC
-        lo = self.read(self.abs_addr)
-        hi = self.read(self.abs_addr + 1)
+        lo = self.bus.read(self.abs_addr)
+        hi = self.bus.read(self.abs_addr + 1)
         self.pc = (hi << 8) | lo
         self.rel_addr = 0
         self.abs_addr = 0
@@ -371,20 +361,20 @@ class MOS6502:
             self._set_status(Status.I, True)
             self._push_to_stack(self.all_status_as_int())
             self.abs_addr = dst_addr
-            lo, hi = self.read(self.abs_addr), self.read(self.abs_addr+1)
+            lo, hi = self.bus.read(self.abs_addr), self.bus.read(self.abs_addr+1)
             self.pc = (hi << 8) | lo
             self.cycle = num_cycles
 
     def _push_to_stack(self, data):
-        self.write(0x0100 + self.stkp, data)
+        self.bus.write(0x0100 + self.stkp, data)
         self.stkp -= 1
 
     def _pop_from_stack(self):
         self.stkp += 1
-        return self.read(0x0100 + self.stkp)
+        return self.bus.read(0x0100 + self.stkp)
 
     def irq(self):
-        self._interupt_if(self._get_status(Status.I) is True, 0xFFFE, 7)
+        self._interupt_if(bool(self.p & Status.I), 0xFFFE, 7)
 
     def nmi(self):
         self._interupt_if(True, 0xFFFA, 8)
@@ -398,14 +388,17 @@ class MOS6502:
         return 0
 
     def _get_status(self, flag: Status):
-        return self.status[flag] != 0
+        return (self.p & flag) != 0
 
     def _set_status(self, flag: Status, enabled: bool):
-        self.status[flag] = 1 if enabled else 0
+        if enabled:
+            self.p |= flag
+        else:
+            self.p &= ~flag & 0xFF
 
     def _comp_adc(self):
         self.fetch()
-        added = self.a + self.fetched + self.status[Status.C]
+        added = self.a + self.fetched + (1 if (self.p & Status.C) else 0)
         self._set_status(Status.C, added > 255)
         self._set_status(Status.Z, (added & 0x00FF) == 0)
         self._set_status(Status.V, ((~self.a ^ self.fetched) & (self.a ^ added) & 0x0080) > 0)
@@ -416,7 +409,7 @@ class MOS6502:
     def _comp_sbc(self):
         self.fetch()
         value = self.fetched ^ 0x00FF
-        added = self.a + value + self.status[Status.C]
+        added = self.a + value + (1 if (self.p & Status.C) else 0)
         self._set_status(Status.C, added > 255)
         self._set_status(Status.Z, (added & 0x00FF) == 0)
         self._set_status(Status.V, ((~self.a ^ value) & (self.a ^ added) & 0x0080) > 0)
@@ -464,12 +457,12 @@ class MOS6502:
         if self.opcode_table[self.opcode][2] == self._addr_imp:
             self.a = new_val & 0x00FF
         else:
-            self.write(self.abs_addr, new_val & 0x00FF)
+            self.bus.write(self.abs_addr, new_val & 0x00FF)
         return 0
 
-    def _comp_bcc(self): return self._branch_if(self._get_status(Status.C) is False)
-    def _comp_bcs(self): return self._branch_if(self._get_status(Status.C) is True)
-    def _comp_beq(self): return self._branch_if(self._get_status(Status.Z) is True)
+    def _comp_bcc(self): return self._branch_if(not (self.p & Status.C))
+    def _comp_bcs(self): return self._branch_if(bool(self.p & Status.C))
+    def _comp_beq(self): return self._branch_if(bool(self.p & Status.Z))
 
     def _comp_bit(self):
         self.fetch()
@@ -479,9 +472,9 @@ class MOS6502:
         self._set_status(Status.V, self.fetched & (1 << 6))
         return 0
 
-    def _comp_bmi(self): return self._branch_if(self._get_status(Status.N) is True)
-    def _comp_bne(self): return self._branch_if(self._get_status(Status.Z) is False)
-    def _comp_bpl(self): return self._branch_if(self._get_status(Status.N) is False)
+    def _comp_bmi(self): return self._branch_if(bool(self.p & Status.N))
+    def _comp_bne(self): return self._branch_if(not (self.p & Status.Z))
+    def _comp_bpl(self): return self._branch_if(not (self.p & Status.N))
 
     def _comp_brk(self):
         self.pc += 1
@@ -490,13 +483,13 @@ class MOS6502:
         self._set_status(Status.B, True)
         self._push_to_stack(self.all_status_as_int())
         self._set_status(Status.B, False)
-        lo = self.read(0xFFFE)
-        hi = self.read(0xFFFF)
+        lo = self.bus.read(0xFFFE)
+        hi = self.bus.read(0xFFFF)
         self.pc = (hi << 8) | lo
         return 0
 
-    def _comp_bvc(self): return self._branch_if(self._get_status(Status.V) is False)
-    def _comp_bvs(self): return self._branch_if(self._get_status(Status.V) is True)
+    def _comp_bvc(self): return self._branch_if(not (self.p & Status.V))
+    def _comp_bvs(self): return self._branch_if(bool(self.p & Status.V))
 
     def _comp_clc(self): self._set_status(Status.C, False); return 0
     def _comp_cld(self): self._set_status(Status.D, False); return 0
@@ -506,25 +499,31 @@ class MOS6502:
     def _comp_cmp(self):
         self.fetch()
         val = self.a - self.fetched
-        self._set_status(Status.C, self.a >= self.fetched)
-        self._set_status(Status.Z, (val & 0x00FF) == 0)
-        self._set_status(Status.N, (val & 0x80) > 0)
+        p = self.p & ~(Status.C | Status.Z | Status.N)
+        if self.a >= self.fetched: p |= Status.C
+        if (val & 0xFF) == 0: p |= Status.Z
+        if val & 0x80: p |= Status.N
+        self.p = p
         return 0
 
     def _comp_cpx(self):
         self.fetch()
         val = self.x - self.fetched
-        self._set_status(Status.C, self.x >= self.fetched)
-        self._set_status(Status.Z, (val & 0x00FF) == 0)
-        self._set_status(Status.N, (val & 0x80) > 0)
+        p = self.p & ~(Status.C | Status.Z | Status.N)
+        if self.x >= self.fetched: p |= Status.C
+        if (val & 0xFF) == 0: p |= Status.Z
+        if val & 0x80: p |= Status.N
+        self.p = p
         return 0
 
     def _comp_cpy(self):
         self.fetch()
         val = self.y - self.fetched
-        self._set_status(Status.C, self.y >= self.fetched)
-        self._set_status(Status.Z, (val & 0x00FF) == 0)
-        self._set_status(Status.N, (val & 0x80) > 0)
+        p = self.p & ~(Status.C | Status.Z | Status.N)
+        if self.y >= self.fetched: p |= Status.C
+        if (val & 0xFF) == 0: p |= Status.Z
+        if val & 0x80: p |= Status.N
+        self.p = p
         return 0
 
     def _comp_dec(self):
@@ -532,7 +531,7 @@ class MOS6502:
         val = self.fetched - 1
         self._set_status(Status.Z, (val & 0x00FF) == 0)
         self._set_status(Status.N, (val & 0x0080) > 0)
-        self.write(self.abs_addr, val & 0x00FF)
+        self.bus.write(self.abs_addr, val & 0x00FF)
         return 0
 
     def _comp_dex(self):
@@ -561,7 +560,7 @@ class MOS6502:
         val = ((self.fetched + 1) & 0x00FF)
         self._set_status(Status.Z, (val & 0x00FF) == 0)
         self._set_status(Status.N, (val & 0x0080) > 0)
-        self.write(self.abs_addr, val)
+        self.bus.write(self.abs_addr, val)
         return 0
 
     def _comp_inx(self):
@@ -587,22 +586,28 @@ class MOS6502:
     def _comp_lda(self):
         self.fetch()
         self.a = self.fetched
-        self._set_status(Status.Z, self.a == 0)
-        self._set_status(Status.N, (self.a & 0x0080) > 0)
+        p = self.p & ~(Status.Z | Status.N)
+        if self.a == 0: p |= Status.Z
+        if self.a & 0x80: p |= Status.N
+        self.p = p
         return 1
 
     def _comp_ldx(self):
         self.fetch()
         self.x = self.fetched
-        self._set_status(Status.Z, self.x == 0)
-        self._set_status(Status.N, (self.x & 0x0080) > 0)
+        p = self.p & ~(Status.Z | Status.N)
+        if self.x == 0: p |= Status.Z
+        if self.x & 0x80: p |= Status.N
+        self.p = p
         return 1
 
     def _comp_ldy(self):
         self.fetch()
         self.y = self.fetched
-        self._set_status(Status.Z, self.y == 0)
-        self._set_status(Status.N, (self.y & 0x0080) > 0)
+        p = self.p & ~(Status.Z | Status.N)
+        if self.y == 0: p |= Status.Z
+        if self.y & 0x80: p |= Status.N
+        self.p = p
         return 1
 
     def _comp_lsr(self):
@@ -613,7 +618,7 @@ class MOS6502:
         self._set_status(Status.Z, (new_val & 0x00FF) == 0)
         self._set_status(Status.N, (new_val & 0x80) > 0)
         if self.opcode_table[self.opcode][2] == self._addr_imp: self.a = (new_val & 0xFF)
-        else: self.write(self.abs_addr, new_val)
+        else: self.bus.write(self.abs_addr, new_val)
         return 0
 
     def _comp_jam(self): self.jammed = True; return 0
@@ -652,25 +657,25 @@ class MOS6502:
 
     def _comp_rol(self):
         self.fetch()
-        old_carry_flag = self.status[Status.C]
+        old_carry_flag = (1 if (self.p & Status.C) else 0)
         self.fetched = (self.fetched << 1) | (old_carry_flag)
         self._set_status(Status.C, (self.fetched & 0xFF00) > 0)
         self._set_status(Status.Z, (self.fetched & 0xFF) == 0)
         self._set_status(Status.N, (self.fetched & 0x80) > 0)
         if self.opcode_table[self.opcode][2] == self._addr_imp: self.a = (self.fetched & 0xFF)
-        else: self.write(self.abs_addr, (self.fetched & 0xFF))
+        else: self.bus.write(self.abs_addr, (self.fetched & 0xFF))
         return 0
 
     def _comp_ror(self):
         self.fetch()
-        old_carry_flag = self.status[Status.C]
+        old_carry_flag = (1 if (self.p & Status.C) else 0)
         old_val = self.fetched
         self.fetched = ((self.fetched >> 1) & 0xFF) | (int(old_carry_flag) << 7)
         self._set_status(Status.C, (old_val & 0x01) > 0)
         self._set_status(Status.Z, (self.fetched & 0xFF) == 0)
         self._set_status(Status.N, (self.fetched & 0x80) > 0)
         if self.opcode_table[self.opcode][2] == self._addr_imp: self.a = self.fetched
-        else: self.write(self.abs_addr, self.fetched)
+        else: self.bus.write(self.abs_addr, self.fetched)
         return 0
 
     def _comp_rti(self):
@@ -693,9 +698,9 @@ class MOS6502:
     def _comp_sed(self): self._set_status(Status.D, True); return 0
     def _comp_sei(self): self._set_status(Status.I, True); return 0
 
-    def _comp_sta(self): self.write(self.abs_addr, self.a); return 0
-    def _comp_stx(self): self.write(self.abs_addr, self.x); return 0
-    def _comp_sty(self): self.write(self.abs_addr, self.y); return 0
+    def _comp_sta(self): self.bus.write(self.abs_addr, self.a); return 0
+    def _comp_stx(self): self.bus.write(self.abs_addr, self.x); return 0
+    def _comp_sty(self): self.bus.write(self.abs_addr, self.y); return 0
 
     def _comp_tax(self):
         self.x = self.a
@@ -729,40 +734,40 @@ class MOS6502:
         return 0
 
     def _comp_lax(self): self._comp_lda(); return self._comp_ldx()
-    def _comp_sax(self): m = self.x & self.a; self.write(self.abs_addr, m); return 0
+    def _comp_sax(self): m = self.x & self.a; self.bus.write(self.abs_addr, m); return 0
 
     def _addr_imp(self): self.fetched = self.a; return 0
     def _addr_imm(self): self.abs_addr = self.pc; self.pc += 1; return 0
-    def _addr_zp0(self): self.abs_addr = self.read(self.pc) & 0x00FF; self.pc += 1; return 0
-    def _addr_zpx(self): self.abs_addr = (self.read(self.pc) + self.x) & 0x00FF; self.pc += 1; return 0
-    def _addr_zpy(self): self.abs_addr = (self.read(self.pc) + self.y) & 0x00FF; self.pc += 1; return 0
+    def _addr_zp0(self): self.abs_addr = self.bus.read(self.pc) & 0x00FF; self.pc += 1; return 0
+    def _addr_zpx(self): self.abs_addr = (self.bus.read(self.pc) + self.x) & 0x00FF; self.pc += 1; return 0
+    def _addr_zpy(self): self.abs_addr = (self.bus.read(self.pc) + self.y) & 0x00FF; self.pc += 1; return 0
     def _addr_rel(self):
-        self.rel_addr = self.read(self.pc); self.pc += 1
+        self.rel_addr = self.bus.read(self.pc); self.pc += 1
         if self.rel_addr & 0x80: self.rel_addr |= 0xFF00
         return 0
     def _addr_abs(self):
-        lo, hi = self.read(self.pc), self.read(self.pc+1)
+        lo, hi = self.bus.read(self.pc), self.bus.read(self.pc+1)
         self.pc += 2; self.abs_addr = (hi << 8) | lo; return 0
     def _addr_abx(self):
-        lo, hi = self.read(self.pc), self.read(self.pc+1)
+        lo, hi = self.bus.read(self.pc), self.bus.read(self.pc+1)
         self.pc += 2; self.abs_addr = ((hi << 8) | lo) + self.x; self.abs_addr &= 0xFFFF
         return 1 if (self.abs_addr & 0xFF00) != (hi << 8) else 0
     def _addr_aby(self):
-        lo, hi = self.read(self.pc), self.read(self.pc+1)
+        lo, hi = self.bus.read(self.pc), self.bus.read(self.pc+1)
         self.pc += 2; self.abs_addr = ((hi << 8) | lo) + self.y; self.abs_addr &= 0xFFFF
         return 1 if (self.abs_addr & 0xFF00) != (hi << 8) else 0
     def _addr_ind(self):
-        ptr_lo, ptr_hi = self.read(self.pc), self.read(self.pc+1); self.pc += 2
+        ptr_lo, ptr_hi = self.bus.read(self.pc), self.bus.read(self.pc+1); self.pc += 2
         ptr = (ptr_hi << 8) | ptr_lo
-        if ptr_lo == 0x00FF: self.abs_addr = (self.read(ptr & 0xFF00) << 8) | self.read(ptr)
-        else: self.abs_addr = (self.read(ptr+1) << 8) | self.read(ptr)
+        if ptr_lo == 0x00FF: self.abs_addr = (self.bus.read(ptr & 0xFF00) << 8) | self.bus.read(ptr)
+        else: self.abs_addr = (self.bus.read(ptr+1) << 8) | self.bus.read(ptr)
         return 0
     def _addr_izx(self):
-        ptr = self.read(self.pc); self.pc += 1
-        lo, hi = self.read((ptr + self.x) & 0x00FF), self.read((ptr + self.x + 1) & 0x00FF)
+        ptr = self.bus.read(self.pc); self.pc += 1
+        lo, hi = self.bus.read((ptr + self.x) & 0x00FF), self.bus.read((ptr + self.x + 1) & 0x00FF)
         self.abs_addr = (hi << 8) | lo; return 0
     def _addr_izy(self):
-        ptr = self.read(self.pc); self.pc += 1
-        lo, hi = self.read(ptr & 0x00FF), self.read((ptr + 1) & 0x00FF)
+        ptr = self.bus.read(self.pc); self.pc += 1
+        lo, hi = self.bus.read(ptr & 0x00FF), self.bus.read((ptr + 1) & 0x00FF)
         self.abs_addr = ((hi << 8) | lo) + self.y; self.abs_addr &= 0xFFFF
         return 1 if (self.abs_addr & 0xFF00) != (hi << 8) else 0
