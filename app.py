@@ -139,13 +139,12 @@ def main():
         draw_ppu_screen(bus, ppu_screen_rect, screen)
         pygame.display.flip()
 
-        # Render debug window
-        if debug_mode and debug_window:
+        # Render debug window (update every 10 frames to avoid flicker)
+        if debug_mode and debug_window and frame_count % 10 == 0:
             debug_surf.fill((0, 0, 0))
-            if frame_count % 10 == 0:
-                draw_memory_view(bus, dbg_memory_rect, 0x0000, debug_surf, font)
-                draw_pattern_table(bus, 0, dbg_pt0_rect, debug_surf)
-                draw_pattern_table(bus, 1, dbg_pt1_rect, debug_surf)
+            draw_memory_view(bus, dbg_memory_rect, 0x0000, debug_surf, font)
+            draw_pattern_table(bus, 0, dbg_pt0_rect, debug_surf)
+            draw_pattern_table(bus, 1, dbg_pt1_rect, debug_surf)
             draw_status_bits(cpu, dbg_status_rect, debug_surf, font)
             draw_program_counter(cpu, dbg_pc_rect, debug_surf, font)
             draw_registers(cpu, dbg_reg_rect, debug_surf, font)
