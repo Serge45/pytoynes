@@ -240,7 +240,7 @@ cdef class MOS6502:
             0xE3: ("ISC", self._comp_isc, self._addr_izx, 8),
             0xE7: ("ISC", self._comp_isc, self._addr_zp0, 5),
             0xEF: ("ISC", self._comp_isc, self._addr_abs, 6),
-            0xF3: ("ISC", self._comp_isc, self._addr_izy, 4),
+            0xF3: ("ISC", self._comp_isc, self._addr_izy, 8),
             0xF7: ("ISC", self._comp_isc, self._addr_zpx, 6),
             0xFB: ("ISC", self._comp_isc, self._addr_aby, 7),
             0xFF: ("ISC", self._comp_isc, self._addr_abx, 7),
@@ -429,27 +429,33 @@ cdef class MOS6502:
 
     cdef int _comp_dcp(self):
         self._comp_dec()
-        return self._comp_cmp()
+        self._comp_cmp()
+        return 0
 
     cdef int _comp_isc(self):
         self._comp_inc()
-        return self._comp_sbc()
+        self._comp_sbc()
+        return 0
 
     cdef int _comp_slo(self):
         self._comp_asl()
-        return self._comp_ora()
+        self._comp_ora()
+        return 0
 
     cdef int _comp_rla(self):
         self._comp_rol()
-        return self._comp_and()
+        self._comp_and()
+        return 0
 
     cdef int _comp_sre(self):
         self._comp_lsr()
-        return self._comp_eor()
+        self._comp_eor()
+        return 0
 
     cdef int _comp_rra(self):
         self._comp_ror()
-        return self._comp_adc()
+        self._comp_adc()
+        return 0
 
     cdef int _comp_and(self):
         self.fetch()
@@ -545,7 +551,7 @@ cdef class MOS6502:
         if val & 0x80:
             p |= Status.N
         self.p = p
-        return 0
+        return 1
 
     cdef int _comp_cpx(self):
         cdef int val, p
@@ -693,14 +699,14 @@ cdef class MOS6502:
         return 0
 
     cdef int _comp_nop(self):
-        return 0
+        return 1
 
     cdef int _comp_ora(self):
         self.fetch()
         self.a |= self.fetched
         self._set_status(Status.Z, (self.a & 0xFF) == 0)
         self._set_status(Status.N, (self.a & 0x80) > 0)
-        return 0
+        return 1
 
     cdef int _comp_pha(self):
         self._push_to_stack(self.a)

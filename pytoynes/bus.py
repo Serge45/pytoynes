@@ -10,8 +10,6 @@ class Bus:
         self._cartridge: Optional[Cartridge] = None
         self.ppu = PPU()
         self.controllers = [Controller(), Controller()]
-        self._prg_memory = None
-        self._prg_mask = 0x3FFF
 
     @property
     def cartridge(self):
@@ -21,8 +19,6 @@ class Bus:
     def cartridge(self, cartridge):
         self._cartridge = cartridge
         if cartridge is not None:
-            self._prg_memory = cartridge.prg_memory
-            self._prg_mask = 0x7FFF if cartridge.rom.num_prg_banks > 1 else 0x3FFF
             self.ppu.connect_cartridge(cartridge)
             self.ppu.mirror_mode = cartridge.rom.mirroring
 
@@ -31,7 +27,7 @@ class Bus:
 
     def write(self, addr, data):
         if addr >= 0x8000:
-            return
+            self.cartridge.cpu_write(addr, data)
         elif addr <= 0x1FFF:
             self.ram[addr & 0x07FF] = data & 0xFF
         elif addr <= 0x3FFF:
@@ -46,7 +42,7 @@ class Bus:
 
     def read(self, addr):
         if addr >= 0x8000:
-            return self._prg_memory[addr & self._prg_mask]
+            return self.cartridge.cpu_read(addr)
         elif addr <= 0x1FFF:
             return self.ram[addr & 0x07FF]
         elif addr <= 0x3FFF:

@@ -536,12 +536,11 @@ class PPU:
 
     def connect_cartridge(self, cartridge: Cartridge):
         self.cartridge = cartridge
-        self._chr_memory = cartridge.chr_memory
 
     def ppu_read(self, addr: int) -> int:
         addr &= 0x3FFF
         if addr <= 0x1FFF:
-            return self._chr_memory[addr]
+            return self.cartridge.ppu_read(addr)
         elif addr <= 0x3EFF:
             return self.vram[self._map_nt_addr(addr)]
         else:
@@ -552,7 +551,7 @@ class PPU:
     def ppu_write(self, addr: int, data: int):
         addr &= 0x3FFF
         if addr <= 0x1FFF:
-            self._chr_memory[addr] = data
+            self.cartridge.ppu_write(addr, data)
         elif addr <= 0x3EFF:
             self.vram[self._map_nt_addr(addr)] = data & 0xFF
         else:

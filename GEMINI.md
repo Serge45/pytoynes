@@ -78,10 +78,16 @@ The current goal is to implement the Picture Processing Unit (PPU). This require
 ### 4. PPU Implementation (Core)
 - [x] **Internal Memory:** Implement Pattern Tables, Name Tables, Attribute Tables, and Palettes.
 - [x] **Registers:** Implement `PPUCTRL`, `PPUMASK`, `PPUSTATUS`, `OAMADDR`, `OAMDATA`, `PPUSCROLL`, `PPUADDR`, `PPUDATA`.
-- [ ] **Rendering Pipeline:** Implement background and sprite rendering (scanline-based or pixel-based).
+- [x] **Rendering Pipeline:** Implement background and sprite rendering (scanline-based and vectorized NumPy fast-path).
 - [x] **Timing:** Synchronize PPU cycles with CPU cycles (3 PPU cycles per 1 CPU cycle for NTSC).
 - [x] **Interrupts:** Trigger NMI on VBlank if enabled in `PPUCTRL`.
 
 ### 5. Validation
+- [x] **CPU Accuracy:** Verified with automated `nestest.nes` validation (first 8991 instructions).
 - [ ] **PPU Test ROMs:** Utilize specialized PPU test ROMs (e.g., `vbl_nmi_timing`, `palette_test`).
-- [ ] **Visual Verification:** Verify correct rendering of backgrounds and sprites in `app.py`.
+- [x] **Visual Verification:** Verify correct rendering of backgrounds and sprites in `app.py`.
+
+## Technical Notes: Architecture & Performance
+- **Cython/Python Hybrid:** The core components (`mos6502`, `ppu`, `bus`) are implemented in both `.py` (for ease of testing) and `.pyx` (for performance via Cython).
+- **Mapper Interface:** All memory accesses are routed through the `Cartridge` and `Mapper` classes. This ensures compatibility with complex NES mappers at the cost of slight Python overhead when calling methods from Cython.
+- **Rendering:** The PPU uses NumPy for vectorized scanline rendering, which is significantly faster than pixel-by-pixel Python loops.

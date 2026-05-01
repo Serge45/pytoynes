@@ -56,7 +56,6 @@ cdef class PPU:
         self.sprite_x_counters = array.array('B', bytearray(8))
         self.sprite_zero_hit_possible = False
         self.is_odd_frame = False
-        self._chr_memory = None
 
     cpdef void clock(self):
         cdef int scanline = self.scanline
@@ -149,7 +148,6 @@ cdef class PPU:
     cdef void _render_scanline_fast(self):
         cdef int ppu_mask = self.ppu_mask
         cdef int scanline = self.scanline
-        cdef unsigned char[:] chr_memory = self._chr_memory
         cdef unsigned char[:] vram_view = self.vram
         cdef int v, fine_x_val, table, fine_y, t_tile, pal_idx
         cdef int nt_idx, at_idx, pt_addr, tile_id, attr
@@ -180,8 +178,8 @@ cdef class PPU:
                 pal_idx = attr & 0x03
 
                 pt_addr = (table << 12) | (tile_id << 4) | fine_y
-                lsb = chr_memory[pt_addr]
-                msb = chr_memory[pt_addr + 8]
+                lsb = self.ppu_read(pt_addr)
+                msb = self.ppu_read(pt_addr + 8)
 
                 base_x = t_tile * 8 - fine_x_val
                 for p in range(8):
@@ -470,11 +468,10 @@ cdef class PPU:
 
     cpdef void connect_cartridge(self, object cartridge):
         self.cartridge = cartridge
-        self._chr_memory = bytearray(cartridge.chr_memory)
 
     cpdef int ppu_read(self, int addr):
         addr &= 0x3FFF
-        if addr <= 0x1FFF: return self._chr_memory[addr]
+        if addr <= 0x1FFF: return self.cartridge.ppu_read(addr)
         elif addr <= 0x3EFF: return self.vram[self._map_nt_addr(addr)]
         else:
             addr &= 0x001F
@@ -483,7 +480,7 @@ cdef class PPU:
 
     cpdef void ppu_write(self, int addr, int data):
         addr &= 0x3FFF
-        if addr <= 0x1FFF: self._chr_memory[addr] = data
+        if addr <= 0x1FFF: self.cartridge.ppu_write(addr, data)
         elif addr <= 0x3EFF: self.vram[self._map_nt_addr(addr)] = data & 0xFF
         else:
             addr &= 0x001F
