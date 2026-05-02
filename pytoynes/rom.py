@@ -21,6 +21,7 @@ class Rom:
             self.num_prg_banks = rom_data[cursor]
             cursor += 1
             self.num_chr_banks = rom_data[cursor]
+            cursor += 1
             flag_6 = rom_data[cursor]
             cursor += 1
             self.mirroring = MirrorMode(flag_6 & 0b00000001)

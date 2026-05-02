@@ -186,7 +186,6 @@ class PPU:
     def _render_scanline_fast(self):
         ppu_mask = self.ppu_mask
         scanline = self.scanline
-        chr_memory = self._chr_memory
         vram = self.vram
         map_nt = self._map_nt_addr
         bg_pixels = self._bg_pixels
@@ -212,7 +211,7 @@ class PPU:
                 pal_idx = attr & 0x03
 
                 pt_addr = (table << 12) | (tile_id << 4) | fine_y
-                decoded = tile_decode[chr_memory[pt_addr] | (chr_memory[pt_addr + 8] << 8)]
+                decoded = tile_decode[self.ppu_read(pt_addr) | (self.ppu_read(pt_addr + 8) << 8)]
 
                 base_x = t * 8 - fine_x
                 for p in range(8):
