@@ -12,6 +12,9 @@ cdef class Cartridge:
                 self.chr_memory = bytearray(self.rom.chr_rom_data)
             else:
                 self.chr_memory = bytearray(8192)
+            
+            # Most mappers support 8KB of PRG RAM (WRAM) at $6000-$7FFF
+            self.prg_ram = bytearray(8192)
 
             if self.rom.mapper == 0:
                 self.mapper = Mapper000(self.rom.num_prg_banks, self.rom.num_chr_banks, self.rom.mirroring)
@@ -29,17 +32,23 @@ cdef class Cartridge:
             self.rom = None
             self.prg_memory = bytearray(65536)
             self.chr_memory = bytearray(8192)
+            self.prg_ram = bytearray(8192)
             self.mapper = Mapper000(1, 1) # Default to mapper 0
 
     cpdef int cpu_read(self, int addr):
         cdef int mapped_addr = self.mapper.map_cpu_read_addr(addr)
         if mapped_addr != -1:
+            if mapped_addr & 0x10000000:
+                return self.prg_ram[mapped_addr & 0x0FFFFFFF]
             return self.prg_memory[mapped_addr]
         return 0
 
     cpdef int cpu_write(self, int addr, int data):
         cdef int mapped_addr = self.mapper.map_cpu_write_addr(addr, data)
         if mapped_addr != -1:
+            if mapped_addr & 0x10000000:
+                self.prg_ram[mapped_addr & 0x0FFFFFFF] = data
+                return data
             self.prg_memory[mapped_addr] = data
             return data
         return 0

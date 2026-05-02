@@ -6,6 +6,7 @@ cdef class Cartridge:
     cdef public Mapper mapper
     cdef public unsigned char[:] prg_memory
     cdef public unsigned char[:] chr_memory
+    cdef public unsigned char[:] prg_ram
 
     cpdef int cpu_read(self, int addr)
     cpdef int cpu_write(self, int addr, int data)

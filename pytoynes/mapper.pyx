@@ -22,19 +22,21 @@ cdef class Mapper:
         pass
 
 cdef class Mapper001(Mapper):
-    def __init__(self, int num_prg_banks, int num_chr_banks):
-        super().__init__(num_prg_banks, num_chr_banks)
+    def __init__(self, int num_prg_banks, int num_chr_banks, int mirror_mode=0):
+        super().__init__(num_prg_banks, num_chr_banks, mirror_mode)
         self.shift_reg = 0x00
         self.shift_count = 0
         self.control_reg = 0x1C
         self.chr_bank0_reg = 0
         self.chr_bank1_reg = 0
         self.prg_bank_reg = 0
-        self.mirror_mode = 0 # Horizontal
 
     cpdef int map_cpu_read_addr(self, int addr):
         cdef int prg_mode = (self.control_reg >> 2) & 0x03
         cdef int bank
+
+        if 0x6000 <= addr <= 0x7FFF:
+            return (addr & 0x1FFF) | 0x10000000
 
         if 0x8000 <= addr <= 0xFFFF:
             if prg_mode <= 1: # 32K mode
@@ -42,7 +44,7 @@ cdef class Mapper001(Mapper):
                 return bank * 0x4000 + (addr & 0x7FFF)
             elif prg_mode == 2: # Fixed $8000, switch $C000
                 if 0x8000 <= addr <= 0xBFFF:
-                    return 0
+                    return addr & 0x3FFF
                 else:
                     bank = self.prg_bank_reg & 0x0F
                     return bank * 0x4000 + (addr & 0x3FFF)
@@ -55,6 +57,9 @@ cdef class Mapper001(Mapper):
         return -1
 
     cpdef int map_cpu_write_addr(self, int addr, int data):
+        if 0x6000 <= addr <= 0x7FFF:
+            return (addr & 0x1FFF) | 0x10000000
+
         if 0x8000 <= addr <= 0xFFFF:
             if data & 0x80: # Reset
                 self.shift_reg = 0x00
@@ -137,8 +142,8 @@ cdef class Mapper000(Mapper):
         return -1
 
 cdef class Mapper002(Mapper):
-    def __init__(self, int num_prg_banks, int num_chr_banks):
-        super().__init__(num_prg_banks, num_chr_banks)
+    def __init__(self, int num_prg_banks, int num_chr_banks, int mirror_mode=0):
+        super().__init__(num_prg_banks, num_chr_banks, mirror_mode)
         self.prg_bank_lo = 0
         self.prg_bank_hi = num_prg_banks - 1
 
@@ -166,8 +171,8 @@ cdef class Mapper002(Mapper):
         return -1
 
 cdef class Mapper003(Mapper):
-    def __init__(self, int num_prg_banks, int num_chr_banks):
-        super().__init__(num_prg_banks, num_chr_banks)
+    def __init__(self, int num_prg_banks, int num_chr_banks, int mirror_mode=0):
+        super().__init__(num_prg_banks, num_chr_banks, mirror_mode)
         self.chr_bank = 0
 
     cpdef int map_cpu_read_addr(self, int addr):
@@ -190,8 +195,8 @@ cdef class Mapper003(Mapper):
         return -1
 
 cdef class Mapper004(Mapper):
-    def __init__(self, int num_prg_banks, int num_chr_banks):
-        super().__init__(num_prg_banks, num_chr_banks)
+    def __init__(self, int num_prg_banks, int num_chr_banks, int mirror_mode=0):
+        super().__init__(num_prg_banks, num_chr_banks, mirror_mode)
         self.target_reg = 0
         self.prg_bank_mode = 0
         self.chr_invert = 0
@@ -200,10 +205,11 @@ cdef class Mapper004(Mapper):
         self.irq_latch = 0
         self.irq_enabled = False
         self.irq_active = False
-        self.mirror_mode = 0
 
     cpdef int map_cpu_read_addr(self, int addr):
         cdef int bank
+        if 0x6000 <= addr <= 0x7FFF:
+            return (addr & 0x1FFF) | 0x10000000
         if 0x8000 <= addr <= 0x9FFF:
             bank = self.regs[6] if self.prg_bank_mode == 0 else (self.num_prg_banks * 2 - 2)
             return bank * 0x2000 + (addr & 0x1FFF)
@@ -218,6 +224,8 @@ cdef class Mapper004(Mapper):
         return -1
 
     cpdef int map_cpu_write_addr(self, int addr, int data):
+        if 0x6000 <= addr <= 0x7FFF:
+            return (addr & 0x1FFF) | 0x10000000
         if 0x8000 <= addr <= 0x9FFF:
             if not (addr & 0x01): # $8000
                 self.target_reg = data & 0x07

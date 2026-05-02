@@ -2,6 +2,7 @@ import time
 import pygame
 from pygame._sdl2.video import Window as SDLWindow, Renderer, Texture
 import sys
+import os
 from pytoynes.bus import Bus
 from pytoynes.rom import Rom
 from pytoynes.mos6502 import MOS6502
@@ -12,7 +13,7 @@ from pytoynes.controller import *
 def main():
     rom_path = './pytoynes/assets/nestest.nes'
     if len(sys.argv) > 1:
-        rom_path = sys.argv[1]
+        rom_path = os.path.expanduser(sys.argv[1])
 
     cpu = MOS6502()
     bus = Bus()
@@ -32,7 +33,8 @@ def main():
     hi = bus.read(0xFFFD)
     cpu.pc = (hi << 8) | lo
 
-    pygame.init()
+    pygame.display.init()
+    pygame.font.init()
 
     screen = pygame.display.set_mode((768, 720))
     pygame.display.set_caption(f"Pytoynes - {rom_path}")

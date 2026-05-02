@@ -30,7 +30,7 @@ cdef class Bus:
 
     cpdef void write(self, int addr, int data):
         cdef int i, base_addr
-        if addr >= 0x8000:
+        if addr >= 0x4020:
             self.cartridge.cpu_write(addr, data)
         elif addr <= 0x1FFF:
             self.ram[addr & 0x07FF] = data & 0xFF
@@ -45,7 +45,7 @@ cdef class Bus:
             self.controllers[1].write(data)
 
     cpdef int read(self, int addr):
-        if addr >= 0x8000:
+        if addr >= 0x4020:
             return self.cartridge.cpu_read(addr)
         elif addr <= 0x1FFF:
             return self.ram[addr & 0x07FF]
