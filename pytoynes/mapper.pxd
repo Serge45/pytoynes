@@ -38,3 +38,4 @@ cdef class Mapper004(Mapper):
     cdef int irq_counter
     cdef int irq_latch
     cdef bint irq_enabled
+    cdef bint reload_flag

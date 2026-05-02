@@ -21,6 +21,32 @@ cdef class Mapper:
     cpdef void count_scanline(self):
         pass
 
+cdef class Mapper000(Mapper):
+    cdef inline int _map_cpu_addr(self, int addr):
+        cdef int mask
+        if addr >= 0x8000 and addr <= 0xFFFF:
+            mask = 0x7FFF if self.num_prg_banks > 1 else 0x3FFF
+            return addr & mask
+        return -1
+
+    cpdef int map_cpu_read_addr(self, int addr):
+        return self._map_cpu_addr(addr)
+
+    cpdef int map_cpu_write_addr(self, int addr, int data):
+        return self._map_cpu_addr(addr)
+
+    cpdef int map_ppu_read_addr(self, int addr):
+        if addr >= 0x0000 and addr <= 0x1FFF:
+            return addr
+        return -1
+
+    cpdef int map_ppu_write_addr(self, int addr, int data):
+        if addr >= 0x0000 and addr <= 0x1FFF:
+            if self.num_chr_banks == 0:
+                # Treat as CHR-RAM
+                return addr
+        return -1
+
 cdef class Mapper001(Mapper):
     def __init__(self, int num_prg_banks, int num_chr_banks, int mirror_mode=0):
         super().__init__(num_prg_banks, num_chr_banks, mirror_mode)
@@ -71,8 +97,6 @@ cdef class Mapper001(Mapper):
                 if self.shift_count == 5:
                     if 0x8000 <= addr <= 0x9FFF:
                         self.control_reg = self.shift_reg
-                        # Mirroring: 0: 1S_LO, 1: 1S_HI, 2: VERT, 3: HORIZ
-                        # Our rom.MirrorMode: HORIZ=0, VERT=1, 1S_LO=2, 1S_HI=3
                         m = self.control_reg & 0x03
                         if m == 0: self.mirror_mode = 2 # 1S_LO
                         elif m == 1: self.mirror_mode = 3 # 1S_HI
@@ -112,32 +136,6 @@ cdef class Mapper001(Mapper):
     cpdef int map_ppu_write_addr(self, int addr, int data):
         if 0x0000 <= addr <= 0x1FFF:
             if self.num_chr_banks == 0: # CHR RAM
-                return addr
-        return -1
-
-cdef class Mapper000(Mapper):
-    cdef inline int _map_cpu_addr(self, int addr):
-        cdef int mask
-        if addr >= 0x8000 and addr <= 0xFFFF:
-            mask = 0x7FFF if self.num_prg_banks > 1 else 0x3FFF
-            return addr & mask
-        return -1
-
-    cpdef int map_cpu_read_addr(self, int addr):
-        return self._map_cpu_addr(addr)
-
-    cpdef int map_cpu_write_addr(self, int addr, int data):
-        return self._map_cpu_addr(addr)
-
-    cpdef int map_ppu_read_addr(self, int addr):
-        if addr >= 0x0000 and addr <= 0x1FFF:
-            return addr
-        return -1
-
-    cpdef int map_ppu_write_addr(self, int addr, int data):
-        if addr >= 0x0000 and addr <= 0x1FFF:
-            if self.num_chr_banks == 0:
-                # Treat as CHR-RAM
                 return addr
         return -1
 
@@ -201,26 +199,32 @@ cdef class Mapper004(Mapper):
         self.prg_bank_mode = 0
         self.chr_invert = 0
         for i in range(8): self.regs[i] = 0
+        self.regs[6] = 0
+        self.regs[7] = 1
         self.irq_counter = 0
         self.irq_latch = 0
         self.irq_enabled = False
         self.irq_active = False
+        self.reload_flag = False
 
     cpdef int map_cpu_read_addr(self, int addr):
         cdef int bank
+        cdef int prg_banks = self.num_prg_banks * 2
+        cdef int prg_mask = prg_banks - 1
+        
         if 0x6000 <= addr <= 0x7FFF:
             return (addr & 0x1FFF) | 0x10000000
         if 0x8000 <= addr <= 0x9FFF:
-            bank = self.regs[6] if self.prg_bank_mode == 0 else (self.num_prg_banks * 2 - 2)
-            return bank * 0x2000 + (addr & 0x1FFF)
+            bank = self.regs[6] if self.prg_bank_mode == 0 else (prg_banks - 2)
+            return (bank & prg_mask) * 0x2000 + (addr & 0x1FFF)
         if 0xA000 <= addr <= 0xBFFF:
             bank = self.regs[7]
-            return bank * 0x2000 + (addr & 0x1FFF)
+            return (bank & prg_mask) * 0x2000 + (addr & 0x1FFF)
         if 0xC000 <= addr <= 0xDFFF:
-            bank = (self.num_prg_banks * 2 - 2) if self.prg_bank_mode == 0 else self.regs[6]
-            return bank * 0x2000 + (addr & 0x1FFF)
+            bank = (prg_banks - 2) if self.prg_bank_mode == 0 else self.regs[6]
+            return (bank & prg_mask) * 0x2000 + (addr & 0x1FFF)
         if 0xE000 <= addr <= 0xFFFF:
-            return (self.num_prg_banks * 2 - 1) * 0x2000 + (addr & 0x1FFF)
+            return (prg_banks - 1) * 0x2000 + (addr & 0x1FFF)
         return -1
 
     cpdef int map_cpu_write_addr(self, int addr, int data):
@@ -235,12 +239,13 @@ cdef class Mapper004(Mapper):
                 self.regs[self.target_reg] = data
         elif 0xA000 <= addr <= 0xBFFF:
             if not (addr & 0x01): # $A000
-                self.mirror_mode = 0 if (data & 0x01) else 1 # 0: HORIZ, 1: VERT
+                # Bit 0: 0=Vert, 1=Horiz. Our rom.MirrorMode: HORIZ=0, VERT=1
+                self.mirror_mode = 1 if (data & 0x01 == 0) else 0
         elif 0xC000 <= addr <= 0xDFFF:
             if not (addr & 0x01): # $C000
                 self.irq_latch = data
             else: # $C001
-                self.irq_counter = 0
+                self.reload_flag = True
         elif 0xE000 <= addr <= 0xFFFF:
             if not (addr & 0x01): # $E000
                 self.irq_enabled = False
@@ -250,21 +255,23 @@ cdef class Mapper004(Mapper):
         return -1
 
     cpdef int map_ppu_read_addr(self, int addr):
+        cdef int mask = self.num_chr_banks * 8 - 1
         if 0x0000 <= addr <= 0x1FFF:
+            if self.num_chr_banks == 0: return addr
             if self.chr_invert == 0:
-                if 0x0000 <= addr <= 0x07FF: return (self.regs[0] & 0xFE) * 0x0400 + (addr & 0x07FF)
-                if 0x0800 <= addr <= 0x0FFF: return (self.regs[1] & 0xFE) * 0x0400 + (addr & 0x07FF)
-                if 0x1000 <= addr <= 0x13FF: return self.regs[2] * 0x0400 + (addr & 0x03FF)
-                if 0x1400 <= addr <= 0x17FF: return self.regs[3] * 0x0400 + (addr & 0x03FF)
-                if 0x1800 <= addr <= 0x1BFF: return self.regs[4] * 0x0400 + (addr & 0x03FF)
-                if 0x1C00 <= addr <= 0x1FFF: return self.regs[5] * 0x0400 + (addr & 0x03FF)
+                if 0x0000 <= addr <= 0x07FF: return ((self.regs[0] & 0xFE) & mask) * 0x0400 + (addr & 0x07FF)
+                if 0x0800 <= addr <= 0x0FFF: return ((self.regs[1] & 0xFE) & mask) * 0x0400 + (addr & 0x07FF)
+                if 0x1000 <= addr <= 0x13FF: return (self.regs[2] & mask) * 0x0400 + (addr & 0x03FF)
+                if 0x1400 <= addr <= 0x17FF: return (self.regs[3] & mask) * 0x0400 + (addr & 0x03FF)
+                if 0x1800 <= addr <= 0x1BFF: return (self.regs[4] & mask) * 0x0400 + (addr & 0x03FF)
+                if 0x1C00 <= addr <= 0x1FFF: return (self.regs[5] & mask) * 0x0400 + (addr & 0x03FF)
             else:
-                if 0x0000 <= addr <= 0x03FF: return self.regs[2] * 0x0400 + (addr & 0x03FF)
-                if 0x0400 <= addr <= 0x07FF: return self.regs[3] * 0x0400 + (addr & 0x03FF)
-                if 0x0800 <= addr <= 0x0BFF: return self.regs[4] * 0x0400 + (addr & 0x03FF)
-                if 0x0C00 <= addr <= 0x0FFF: return self.regs[5] * 0x0400 + (addr & 0x03FF)
-                if 0x1000 <= addr <= 0x17FF: return (self.regs[0] & 0xFE) * 0x0400 + (addr & 0x07FF)
-                if 0x1800 <= addr <= 0x1FFF: return (self.regs[1] & 0xFE) * 0x0400 + (addr & 0x07FF)
+                if 0x0000 <= addr <= 0x03FF: return (self.regs[2] & mask) * 0x0400 + (addr & 0x03FF)
+                if 0x0400 <= addr <= 0x07FF: return (self.regs[3] & mask) * 0x0400 + (addr & 0x03FF)
+                if 0x0800 <= addr <= 0x0BFF: return (self.regs[4] & mask) * 0x0400 + (addr & 0x03FF)
+                if 0x0C00 <= addr <= 0x0FFF: return (self.regs[5] & mask) * 0x0400 + (addr & 0x03FF)
+                if 0x1000 <= addr <= 0x17FF: return ((self.regs[0] & 0xFE) & mask) * 0x0400 + (addr & 0x07FF)
+                if 0x1800 <= addr <= 0x1FFF: return ((self.regs[1] & 0xFE) & mask) * 0x0400 + (addr & 0x07FF)
         return -1
 
     cpdef int map_ppu_write_addr(self, int addr, int data):
@@ -273,11 +280,11 @@ cdef class Mapper004(Mapper):
         return -1
 
     cpdef void count_scanline(self):
-        if self.irq_counter == 0:
+        if self.irq_counter == 0 or self.reload_flag:
             self.irq_counter = self.irq_latch
+            self.reload_flag = False
         else:
             self.irq_counter -= 1
         
-        if self.irq_counter == 0:
-            if self.irq_enabled:
-                self.irq_active = True
+        if self.irq_counter == 0 and self.irq_enabled:
+            self.irq_active = True

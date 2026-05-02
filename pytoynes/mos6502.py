@@ -354,16 +354,24 @@ class MOS6502:
 
     def _interupt_if(self, cond, dst_addr, num_cycles):
         if cond is True:
-            self._push_to_stack((self.pc >> 8) & 0x00FF)
-            self._push_to_stack(self.pc & 0x00FF)
-            self._set_status(Status.B, False)
-            self._set_status(Status.U, True)
+            # Status to push: B=0, U=1
+            p_to_push = self.all_status_as_int()
+            p_to_push &= ~Status.B
+            p_to_push |= Status.U
+            
+            # Push PC
+            self._push_to_stack((self.pc >> 8) & 0xFF)
+            self._push_to_stack(self.pc & 0xFF)
+            self._push_to_stack(p_to_push)
+            
+            # Set Interrupt Disable flag
             self._set_status(Status.I, True)
-            self._push_to_stack(self.all_status_as_int())
-            self.abs_addr = dst_addr
-            lo, hi = self.bus.read(self.abs_addr), self.bus.read(self.abs_addr+1)
+            
+            # Jump to vector
+            lo, hi = self.bus.read(dst_addr), self.bus.read(dst_addr+1)
             self.pc = (hi << 8) | lo
-            self.cycle = num_cycles
+            return num_cycles
+        return 0
 
     def _push_to_stack(self, data):
         self.bus.write(0x0100 + self.stkp, data)
@@ -374,10 +382,10 @@ class MOS6502:
         return self.bus.read(0x0100 + self.stkp)
 
     def irq(self):
-        self._interupt_if(bool(self.p & Status.I), 0xFFFE, 7)
+        return self._interupt_if(not (self.p & Status.I), 0xFFFE, 7)
 
     def nmi(self):
-        self._interupt_if(True, 0xFFFA, 8)
+        return self._interupt_if(True, 0xFFFA, 8)
 
     def _branch_if(self, cond: bool):
         if cond is True:

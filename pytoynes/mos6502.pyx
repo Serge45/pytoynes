@@ -357,20 +357,28 @@ cdef class MOS6502:
         self.cycle = 0
         self.jammed = False
 
-    cdef void _interupt_if(self, bint cond, int dst_addr, int num_cycles):
-        cdef int lo, hi
+    cdef int _interupt_if(self, bint cond, int dst_addr, int num_cycles):
+        cdef int lo, hi, p_to_push
         if cond is True:
-            self._push_to_stack((self.pc >> 8) & 0x00FF)
-            self._push_to_stack(self.pc & 0x00FF)
-            self._set_status(Status.B, False)
-            self._set_status(Status.U, True)
+            # Push PC
+            self._push_to_stack((self.pc >> 8) & 0xFF)
+            self._push_to_stack(self.pc & 0xFF)
+            
+            # Status to push: B=0, U=1
+            p_to_push = self.all_status_as_int()
+            p_to_push &= ~Status.B
+            p_to_push |= Status.U
+            self._push_to_stack(p_to_push)
+            
+            # Set Interrupt Disable flag
             self._set_status(Status.I, True)
-            self._push_to_stack(self.all_status_as_int())
-            self.abs_addr = dst_addr
-            lo = self.bus.read(self.abs_addr)
-            hi = self.bus.read(self.abs_addr + 1)
+            
+            # Jump to vector
+            lo = self.bus.read(dst_addr)
+            hi = self.bus.read(dst_addr + 1)
             self.pc = (hi << 8) | lo
-            self.cycle = num_cycles
+            return num_cycles
+        return 0
 
     cdef void _push_to_stack(self, int data):
         self.bus.write(0x0100 + self.stkp, data)
@@ -380,11 +388,11 @@ cdef class MOS6502:
         self.stkp += 1
         return self.bus.read(0x0100 + self.stkp)
 
-    cpdef void irq(self):
-        self._interupt_if(bool(self.p & Status.I), 0xFFFE, 7)
+    cpdef int irq(self):
+        return self._interupt_if(not (self.p & Status.I), 0xFFFE, 7)
 
-    cpdef void nmi(self):
-        self._interupt_if(True, 0xFFFA, 8)
+    cpdef int nmi(self):
+        return self._interupt_if(True, 0xFFFA, 8)
 
     cdef int _branch_if(self, bint cond):
         if cond is True:

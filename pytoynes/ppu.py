@@ -127,14 +127,17 @@ class PPU:
             # Pre-render scanline specific logic
             if scanline == -1 and 280 <= cycle <= 304:
                 self._reset_scroll_y()
+            
+            # MMC3 Scanline Counter
+            if cycle == 260:
+                if self.cartridge is not None and (self.ppu_mask & 0x18):
+                    self.cartridge.mapper.count_scanline()
 
         # Update Cycle/Scanline
         self.cycle += 1
         self.total_cycles += 1
         
         if self.cycle >= 341:
-            if self.cartridge is not None:
-                self.cartridge.mapper.count_scanline()
             self.cycle = 0
             self.scanline += 1
             scanline = self.scanline # Update local
@@ -572,15 +575,12 @@ class PPU:
              mode = self.cartridge.mapper.mirror_mode
              
         addr &= 0x0FFF
-        if mode == 1: # VERTICAL
+        if mode == 1: # VERTICAL: A B A B
             return addr & 0x07FF
-        elif mode == 0: # HORIZONTAL
-            if addr < 0x0400: return addr
-            if addr < 0x0800: return addr - 0x0400
-            if addr < 0x0C00: return addr - 0x0400
-            return addr - 0x0800
+        elif mode == 0: # HORIZONTAL: A A B B
+            return (addr & 0x03FF) | ((addr & 0x0800) >> 1)
         elif mode == 2: # ONESCREEN_LO
             return addr & 0x03FF
         elif mode == 3: # ONESCREEN_HI
-            return 0x0400 | (addr & 0x03FF)
+            return (addr & 0x03FF) | 0x0400
         return addr & 0x07FF

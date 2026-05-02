@@ -116,22 +116,24 @@ def main():
         # Run emulation for one frame
         cycles_this_frame = 0
         while cycles_this_frame < 29780:
-            batch_cycles = 0
-            while batch_cycles < 113:
-                cycles = cpu.clock()
-                batch_cycles += cycles
-                total_cpu_cycles += cycles
-            cycles_this_frame += batch_cycles
-
-            bus.ppu.run_to(total_cpu_cycles * 3)
+            # Catch up PPU every instruction for maximum precision
+            # (or every small batch for performance)
+            instr_cycles = cpu.clock()
+            total_cpu_cycles += instr_cycles
+            cycles_this_frame += instr_cycles
 
             if bus.ppu.nmi:
                 bus.ppu.nmi = False
-                cpu.nmi()
+                nmi_cycles = cpu.nmi()
+                total_cpu_cycles += nmi_cycles
+                cycles_this_frame += nmi_cycles
             
             if bus.cartridge.mapper.irq_active:
-                bus.cartridge.mapper.irq_active = False
-                cpu.irq()
+                irq_cycles = cpu.irq()
+                total_cpu_cycles += irq_cycles
+                cycles_this_frame += irq_cycles
+
+            bus.ppu.run_to(total_cpu_cycles * 3)
 
         # Render main window
         now = pygame.time.get_ticks()

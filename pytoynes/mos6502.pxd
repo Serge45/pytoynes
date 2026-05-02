@@ -13,15 +13,17 @@ cdef class MOS6502:
     cpdef int clock(self)
     cpdef void connect(self, Bus bus)
     cpdef void reset(self)
-    cpdef void nmi(self)
-    cpdef void irq(self)
+    cpdef int nmi(self)
+    cpdef int irq(self)
+
     cpdef int all_status_as_int(self)
     cpdef void restore_all_status_from_int(self, int status_int)
 
     cdef int fetch(self)
     cdef void _push_to_stack(self, int data)
     cdef int _pop_from_stack(self)
-    cdef void _interupt_if(self, bint cond, int dst_addr, int num_cycles)
+    cdef int _interupt_if(self, bint cond, int dst_addr, int num_cycles)
+
     cdef inline void _set_status(self, int flag, bint enabled)
     cdef inline bint _get_status(self, int flag)
     cdef int _branch_if(self, bint cond)

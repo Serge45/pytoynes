@@ -14,7 +14,7 @@ cdef class Cartridge:
                 self.chr_memory = bytearray(8192)
             
             # Most mappers support 8KB of PRG RAM (WRAM) at $6000-$7FFF
-            self.prg_ram = bytearray(8192)
+            self.prg_ram = bytearray([0xFF] * 8192)
 
             if self.rom.mapper == 0:
                 self.mapper = Mapper000(self.rom.num_prg_banks, self.rom.num_chr_banks, self.rom.mirroring)

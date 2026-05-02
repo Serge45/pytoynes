@@ -65,6 +65,10 @@ cdef class PPU:
         if -1 <= scanline <= 239:
             if cycle == 257:
                 if scanline >= -1: self._evaluate_sprites()
+            elif cycle == 260:
+                # MMC3 IRQ counter
+                if self.cartridge is not None and (self.ppu_mask & 0x18):
+                    self.cartridge.mapper.count_scanline()
             elif cycle == 340:
                 if scanline >= -1: self._fetch_sprite_data()
 
@@ -101,8 +105,6 @@ cdef class PPU:
         self.total_cycles += 1
 
         if self.cycle >= 341:
-            if self.cartridge is not None:
-                self.cartridge.mapper.count_scanline()
             self.cycle = 0
             self.scanline += 1
             scanline = self.scanline
@@ -121,161 +123,11 @@ cdef class PPU:
 
     cpdef void run_to(self, long long target_total_cycles):
         while self.total_cycles < target_total_cycles:
-            if self.cycle == 0:
-                if 0 <= self.scanline <= 239:
-                    # Fast path: render one visible scanline
-                    self._render_scanline_fast()
-                    if self.cartridge is not None:
-                        self.cartridge.mapper.count_scanline()
-                    self.total_cycles += 341
-                    self.scanline += 1
-                    if self.scanline == 241:
-                        self.ppu_status |= 0x80
-                        if self.ppu_ctrl & 0x80: self.nmi = True
-                elif 240 <= self.scanline <= 260:
-                    # Fast path: skip VBlank scanline (no rendering)
-                    if self.cartridge is not None:
-                        self.cartridge.mapper.count_scanline()
-                    self.total_cycles += 341
-                    self.scanline += 1
-                    if self.scanline == 241:
-                        self.ppu_status |= 0x80
-                        if self.ppu_ctrl & 0x80: self.nmi = True
-                elif self.scanline >= 261:
-                    # Fast path: end of frame
-                    if self.cartridge is not None:
-                        self.cartridge.mapper.count_scanline()
-                    self.total_cycles += 341
-                    self.scanline = -1
-                    self.frame_count += 1
-                    self.ppu_status &= ~0xC0
-                    self.nmi = False
-                    self.is_odd_frame = not self.is_odd_frame
-                else:
-                    self.clock()
-            else:
-                self.clock()
+            self.clock()
 
     cdef void _render_scanline_fast(self):
-        cdef int ppu_mask = self.ppu_mask
-        cdef int scanline = self.scanline
-        cdef unsigned char[:] vram_view = self.vram
-        cdef int v, fine_x_val, table, fine_y, t_tile, pal_idx
-        cdef int nt_idx, at_idx, pt_addr, tile_id, attr
-        cdef int base_x, pixel_x, p, lsb, msb, bit_pos, px
-        cdef bint left_clip, left_clip_spr
-        cdef int i, x, spr_attr, pal
-        cdef bint priority, is_sprite0
-
-        cdef np.ndarray[np.uint8_t, ndim=1] bg_pixels = self._bg_pixels
-        cdef np.ndarray[np.uint8_t, ndim=1] bg_palettes = self._bg_palettes
-        bg_pixels[:] = 0
-        bg_palettes[:] = 0
-
-        if ppu_mask & 0x08:
-            v = (self.v & ~0x041F) | (self.t & 0x041F)
-            fine_x_val = self.fine_x
-            table = (self.ppu_ctrl >> 4) & 0x01
-            fine_y = (v >> 12) & 0x07
-            left_clip = not (ppu_mask & 0x02)
-
-            for t_tile in range(33):
-                nt_idx = self._map_nt_addr(0x2000 | (v & 0x0FFF))
-                tile_id = vram_view[nt_idx]
-                at_idx = self._map_nt_addr(0x23C0 | (v & 0x0C00) | ((v >> 4) & 0x38) | ((v >> 2) & 0x07))
-                attr = vram_view[at_idx]
-                if (v >> 6) & 0x01: attr >>= 4
-                if (v >> 1) & 0x01: attr >>= 2
-                pal_idx = attr & 0x03
-
-                pt_addr = (table << 12) | (tile_id << 4) | fine_y
-                lsb = self.ppu_read(pt_addr)
-                msb = self.ppu_read(pt_addr + 8)
-
-                base_x = t_tile * 8 - fine_x_val
-                for p in range(8):
-                    pixel_x = base_x + p
-                    if 0 <= pixel_x < 256:
-                        if not (left_clip and pixel_x < 8):
-                            bit_pos = 7 - p
-                            px = (((msb >> bit_pos) & 1) << 1) | ((lsb >> bit_pos) & 1)
-                            if px:
-                                bg_pixels[pixel_x] = px
-                                bg_palettes[pixel_x] = pal_idx
-
-                if (v & 0x001F) == 31: v = (v & ~0x001F) ^ 0x0400
-                else: v += 1
-
-        cdef np.ndarray[np.uint8_t, ndim=1] fg_pixels = self._fg_pixels
-        cdef np.ndarray[np.uint8_t, ndim=1] fg_palettes = self._fg_palettes
-        cdef np.ndarray[np.uint8_t, ndim=1] fg_priorities = self._fg_priorities
-        cdef np.ndarray[np.uint8_t, ndim=1] sprite0_possible = self._sprite0_possible
-        fg_pixels[:] = 0
-        fg_palettes[:] = 0
-        fg_priorities[:] = 0
-        sprite0_possible[:] = 0
-
-        if ppu_mask & 0x10:
-            self._evaluate_sprites()
-            self._fetch_sprite_data()
-            left_clip_spr = not (ppu_mask & 0x04)
-
-            for i in range(self.sprite_count - 1, -1, -1):
-                spr_attr = self.sprite_attribs[i]
-                x = self.sprite_x_counters[i]
-                lsb = self.sprite_shifter_pattern_lo[i]
-                msb = self.sprite_shifter_pattern_hi[i]
-                pal = (spr_attr & 0x03) + 0x04
-                priority = (spr_attr & 0x20) == 0
-                is_sprite0 = i == 0 and self.sprite_zero_hit_possible
-
-                for p in range(8):
-                    pixel_x = x + p + 1
-                    if pixel_x < 256:
-                        if not (left_clip_spr and pixel_x < 8):
-                            bit_pos = 7 - p
-                            px = (((msb >> bit_pos) & 1) << 1) | ((lsb >> bit_pos) & 1)
-                            if px:
-                                fg_pixels[pixel_x] = px
-                                fg_palettes[pixel_x] = pal
-                                fg_priorities[pixel_x] = 1 if priority else 0
-                                if is_sprite0:
-                                    sprite0_possible[pixel_x] = 1
-
-        # Combine
-        cdef np.ndarray bg_opaque = bg_pixels > 0
-        cdef np.ndarray fg_opaque = fg_pixels > 0
-
-        if (ppu_mask & 0x18) == 0x18 and self.sprite_zero_hit_possible:
-            hit_mask = bg_opaque & fg_opaque & (sprite0_possible > 0)
-            if hit_mask[:255].any(): self.ppu_status |= 0x40
-
-        cdef np.ndarray[np.uint8_t, ndim=1] final_pixel = np.zeros(256, dtype=np.uint8)
-        cdef np.ndarray[np.uint8_t, ndim=1] final_palette = np.zeros(256, dtype=np.uint8)
-        final_pixel[bg_opaque] = bg_pixels[bg_opaque]
-        final_palette[bg_opaque] = bg_palettes[bg_opaque]
-
-        fg_overwrites = fg_opaque & (~bg_opaque | (fg_priorities > 0))
-        final_pixel[fg_overwrites] = fg_pixels[fg_overwrites]
-        final_palette[fg_overwrites] = fg_palettes[fg_overwrites]
-
-        cdef np.ndarray[np.uint8_t, ndim=1] out_pixels = np.full(256, self.palette_vram[0], dtype=np.uint8)
-        mask = final_pixel > 0
-        if mask.any():
-            pal_indices = (final_palette[mask].astype(np.uint16) << 2) + final_pixel[mask]
-            mirror_mask = (pal_indices & 0x13) == 0x10
-            pal_indices[mirror_mask] &= 0xFFEF
-            pal_vram_np = np.frombuffer(self.palette_vram, dtype=np.uint8)
-            out_pixels[mask] = pal_vram_np[pal_indices & 0x1F]
-
-        if ppu_mask & 0x01: out_pixels &= 0x30
-        self.pixels[scanline] = out_pixels
-
-        if ppu_mask & 0x18:
-            self._increment_scroll_y()
-            self._reset_scroll_x()
-            self._increment_scroll_x()
-            self._increment_scroll_x()
+        # Disabled for accuracy
+        pass
 
     cpdef void _render_pixel(self):
         cdef int ppu_mask = self.ppu_mask
@@ -504,15 +356,12 @@ cdef class PPU:
              mode = self.cartridge.mapper.mirror_mode
              
         addr &= 0x0FFF
-        if mode == 1: # VERTICAL
+        if mode == 1: # VERTICAL: A B A B
             return addr & 0x07FF
-        elif mode == 0: # HORIZONTAL
-            if addr < 0x0400: return addr
-            if addr < 0x0800: return addr - 0x0400
-            if addr < 0x0C00: return addr - 0x0400
-            return addr - 0x0800
+        elif mode == 0: # HORIZONTAL: A A B B
+            return (addr & 0x03FF) | ((addr & 0x0800) >> 1)
         elif mode == 2: # ONESCREEN_LO
             return addr & 0x03FF
         elif mode == 3: # ONESCREEN_HI
-            return 0x0400 | (addr & 0x03FF)
+            return (addr & 0x03FF) | 0x0400
         return addr & 0x07FF
