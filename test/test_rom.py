@@ -159,11 +159,10 @@ class UnitestRom(unittest.TestCase):
         ppu.oam_vram[3] = 10 # X
         
         # We need a cartridge for pattern data
-        # For simplicity, let's mock cartridge.ppu_read to return 0xFF for tile 0x01
-        class MockCartridge:
-            def ppu_read(self, addr): return 0xFF
-            def ppu_write(self, addr, data): pass
-        ppu.cartridge = MockCartridge()
+        ppu.cartridge = Cartridge()
+        # Mock pattern data for tile 0x01
+        for i in range(16):
+            ppu.cartridge.chr_memory[0x0010 + i] = 0xFF
         
         # Setup Background to be opaque at (10, 10)
         # Force bg_shifter_tile_lo to have an opaque bit at the right time

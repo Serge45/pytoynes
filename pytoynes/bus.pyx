@@ -1,7 +1,7 @@
 # cython: language_level=3, boundscheck=False, wraparound=False
 import array
-from .cartridge import Cartridge
-from .ppu import PPU
+from .cartridge cimport Cartridge
+from .ppu cimport PPU
 from .controller import Controller
 
 cdef class Bus:
@@ -16,11 +16,14 @@ cdef class Bus:
         return self._cartridge
 
     @cartridge.setter
-    def cartridge(self, cartridge):
+    def cartridge(self, Cartridge cartridge):
         self._cartridge = cartridge
         if cartridge is not None:
             self.ppu.connect_cartridge(cartridge)
-            self.ppu.mirror_mode = cartridge.rom.mirroring
+            if cartridge.rom is not None:
+                self.ppu.mirror_mode = cartridge.rom.mirroring
+            else:
+                self.ppu.mirror_mode = 0 # Horizontal default
 
     def set_cartridge(self, cartridge):
         self.cartridge = cartridge

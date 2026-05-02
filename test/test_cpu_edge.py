@@ -2,25 +2,14 @@ import unittest
 from pytoynes.mos6502 import MOS6502, Status
 from pytoynes.bus import Bus
 
-class DummyRom:
-    def __init__(self):
-        self.mirroring = 0
-class DummyCartridge:
-    def __init__(self):
-        self.ram = bytearray(65536)
-        self.rom = DummyRom()
-        self.chr_memory = bytearray(8192)
-    def cpu_read(self, addr): return self.ram[addr]
-    def cpu_write(self, addr, data): self.ram[addr] = data
-    def ppu_read(self, addr): return self.chr_memory[addr]
-    def ppu_write(self, addr, data): self.chr_memory[addr] = data
+from pytoynes.cartridge import Cartridge
 
 class TestCPUEdge(unittest.TestCase):
     def setUp(self):
         self.cpu = MOS6502()
         self.bus = Bus()
         self.cpu.connect(self.bus)
-        self.bus.cartridge = DummyCartridge()
+        self.bus.cartridge = Cartridge() # Uses default dummy constructor
 
     def test_adc_overflow(self):
         # 127 + 1 = 128 (-128 signed), should set V
@@ -49,8 +38,8 @@ class TestCPUEdge(unittest.TestCase):
         self.cpu.p = Status.U | Status.I
         self.bus.ram[0x0000] = 0x00 # BRK
         # Vector must be in "Cartridge" space for addr >= 0x8000
-        self.bus.cartridge.ram[0xFFFE] = 0x00
-        self.bus.cartridge.ram[0xFFFF] = 0x10
+        self.bus.cartridge.prg_memory[0xFFFE] = 0x00
+        self.bus.cartridge.prg_memory[0xFFFF] = 0x10
         self.cpu.pc = 0x0000
         self.cpu.clock()
         # Stack should contain PC+2 and P with B set

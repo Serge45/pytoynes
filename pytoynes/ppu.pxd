@@ -1,5 +1,6 @@
 # cython: language_level=3
 cimport numpy as np
+from .cartridge cimport Cartridge
 
 cdef class PPU:
     cdef public int ppu_ctrl, ppu_mask, ppu_status, oam_addr, oam_data
@@ -11,7 +12,6 @@ cdef class PPU:
     cdef public int mirror_mode
 
     cdef public unsigned char[:] vram, palette_vram, oam_vram
-    cdef public unsigned char[:] _chr_memory
     cdef public object pixels  # numpy array
 
     cdef public int bg_next_tile_id, bg_next_tile_attrib
@@ -27,7 +27,7 @@ cdef class PPU:
     cdef public object _bg_pixels, _bg_palettes
     cdef public object _fg_pixels, _fg_palettes, _fg_priorities, _sprite0_possible
 
-    cdef public object cartridge
+    cdef public Cartridge cartridge
 
     cpdef int cpu_read(self, int addr)
     cpdef void cpu_write(self, int addr, int data)
@@ -35,7 +35,7 @@ cdef class PPU:
     cpdef void ppu_write(self, int addr, int data)
     cpdef void run_to(self, long long target_total_cycles)
     cpdef void clock(self)
-    cpdef void connect_cartridge(self, object cartridge)
+    cpdef void connect_cartridge(self, Cartridge cartridge)
 
     cdef void _render_scanline_fast(self)
     cpdef void _render_pixel(self)

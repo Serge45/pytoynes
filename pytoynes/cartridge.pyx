@@ -1,16 +1,15 @@
-from typing import Optional
+# cython: language_level=3, boundscheck=False, wraparound=False
 from .rom import Rom
-from .mapper import Mapper, Mapper000
+from .mapper cimport Mapper, Mapper000
 
-class Cartridge:
-    def __init__(self, rom_path: str = None):
+cdef class Cartridge:
+    def __init__(self, str rom_path=None):
         if rom_path is not None:
             self.rom = Rom(rom_path)
             # make deep copy for reset
-            self.prg_memory = self.rom.prg_rom_data[:]
-            
+            self.prg_memory = bytearray(self.rom.prg_rom_data)
             if self.rom.num_chr_banks > 0:
-                self.chr_memory = self.rom.chr_rom_data[:]
+                self.chr_memory = bytearray(self.rom.chr_rom_data)
             else:
                 self.chr_memory = bytearray(8192)
 
@@ -20,29 +19,29 @@ class Cartridge:
             self.rom = None
             self.prg_memory = bytearray(65536)
             self.chr_memory = bytearray(8192)
-            self.mapper = Mapper000(1, 1)
+            self.mapper = Mapper000(1, 1) # Default to mapper 0
 
-    def cpu_read(self, addr: int):
-        mapped_addr = self.mapper.map_cpu_read_addr(addr)
+    cpdef int cpu_read(self, int addr):
+        cdef int mapped_addr = self.mapper.map_cpu_read_addr(addr)
         if mapped_addr != -1:
             return self.prg_memory[mapped_addr]
         return 0
 
-    def cpu_write(self, addr: int, data):
-        mapped_addr = self.mapper.map_cpu_write_addr(addr)
+    cpdef int cpu_write(self, int addr, int data):
+        cdef int mapped_addr = self.mapper.map_cpu_write_addr(addr)
         if mapped_addr != -1:
             self.prg_memory[mapped_addr] = data
             return data
         return 0
 
-    def ppu_read(self, addr: int):
-        mapped_addr = self.mapper.map_ppu_read_addr(addr)
+    cpdef int ppu_read(self, int addr):
+        cdef int mapped_addr = self.mapper.map_ppu_read_addr(addr)
         if mapped_addr != -1:
             return self.chr_memory[mapped_addr]
         return 0
 
-    def ppu_write(self, addr: int, data: int):
-        mapped_addr = self.mapper.map_ppu_write_addr(addr)
+    cpdef int ppu_write(self, int addr, int data):
+        cdef int mapped_addr = self.mapper.map_ppu_write_addr(addr)
         if mapped_addr != -1:
             self.chr_memory[mapped_addr] = data
             return data

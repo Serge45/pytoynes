@@ -2,7 +2,7 @@
 import array
 cimport numpy as np
 import numpy as np
-from .cartridge import Cartridge
+from .cartridge cimport Cartridge
 from .rom import MirrorMode
 
 cdef class PPU:
@@ -466,7 +466,7 @@ cdef class PPU:
         cdef int bit_pos = 7 - x
         return (((high_byte >> bit_pos) & 0x01) << 1) | ((low_byte >> bit_pos) & 0x01)
 
-    cpdef void connect_cartridge(self, object cartridge):
+    cpdef void connect_cartridge(self, Cartridge cartridge):
         self.cartridge = cartridge
 
     cpdef int ppu_read(self, int addr):
