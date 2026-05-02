@@ -3,6 +3,8 @@ from enum import IntEnum
 class MirrorMode(IntEnum):
     HORIZONTAL = 0
     VERTICAL = 1
+    ONESCREEN_LO = 2
+    ONESCREEN_HI = 3
 
 class TvSystem(IntEnum):
     NTSC = 0

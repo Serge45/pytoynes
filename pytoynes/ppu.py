@@ -133,6 +133,8 @@ class PPU:
         self.total_cycles += 1
         
         if self.cycle >= 341:
+            if self.cartridge is not None:
+                self.cartridge.mapper.count_scanline()
             self.cycle = 0
             self.scanline += 1
             scanline = self.scanline # Update local
@@ -157,6 +159,8 @@ class PPU:
                 if 0 <= self.scanline <= 239:
                     # Fast path: render one visible scanline
                     self._render_scanline_fast()
+                    if self.cartridge is not None:
+                        self.cartridge.mapper.count_scanline()
                     self.total_cycles += 341
                     self.scanline += 1
                     if self.scanline == 241:
@@ -164,6 +168,8 @@ class PPU:
                         if self.ppu_ctrl & 0x80: self.nmi = True
                 elif 240 <= self.scanline <= 260:
                     # Fast path: skip VBlank scanline (no rendering)
+                    if self.cartridge is not None:
+                        self.cartridge.mapper.count_scanline()
                     self.total_cycles += 341
                     self.scanline += 1
                     if self.scanline == 241:
@@ -171,6 +177,8 @@ class PPU:
                         if self.ppu_ctrl & 0x80: self.nmi = True
                 elif self.scanline >= 261:
                     # Fast path: end of frame
+                    if self.cartridge is not None:
+                        self.cartridge.mapper.count_scanline()
                     self.total_cycles += 341
                     self.scanline = -1
                     self.frame_count += 1
@@ -559,10 +567,20 @@ class PPU:
             self.palette_vram[addr] = data & 0x3F
 
     def _map_nt_addr(self, addr: int) -> int:
+        mode = self.mirror_mode
+        if self.cartridge is not None and self.cartridge.mapper is not None:
+             mode = self.cartridge.mapper.mirror_mode
+             
         addr &= 0x0FFF
-        if self.mirror_mode == MirrorMode.VERTICAL: return addr & 0x07FF
-        else:
+        if mode == 1: # VERTICAL
+            return addr & 0x07FF
+        elif mode == 0: # HORIZONTAL
             if addr < 0x0400: return addr
             if addr < 0x0800: return addr - 0x0400
             if addr < 0x0C00: return addr - 0x0400
             return addr - 0x0800
+        elif mode == 2: # ONESCREEN_LO
+            return addr & 0x03FF
+        elif mode == 3: # ONESCREEN_HI
+            return 0x0400 | (addr & 0x03FF)
+        return addr & 0x07FF

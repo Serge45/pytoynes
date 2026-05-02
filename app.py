@@ -126,6 +126,10 @@ def main():
             if bus.ppu.nmi:
                 bus.ppu.nmi = False
                 cpu.nmi()
+            
+            if bus.cartridge.mapper.irq_active:
+                bus.cartridge.mapper.irq_active = False
+                cpu.irq()
 
         # Render main window
         now = pygame.time.get_ticks()
