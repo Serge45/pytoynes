@@ -7,6 +7,7 @@ setup(
         "pytoynes/bus.pyx",
         "pytoynes/mos6502.pyx",
         "pytoynes/ppu.pyx",
+        "pytoynes/apu.pyx",
         "pytoynes/mapper.pyx",
         "pytoynes/cartridge.pyx",
     ], compiler_directives={

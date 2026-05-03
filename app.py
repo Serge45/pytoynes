@@ -56,7 +56,7 @@ def main():
     emu_fps = 0.0
     last_emu_fps_time = pygame.time.get_ticks()
     last_ppu_frame_count = 0
-    total_cpu_cycles = 0
+    total_cpu_cycles = 7
 
     debug_window = None
     debug_renderer = None
@@ -116,20 +116,22 @@ def main():
         # Run emulation for one frame
         cycles_this_frame = 0
         while cycles_this_frame < 29780:
-            # Catch up PPU every instruction for maximum precision
-            # (or every small batch for performance)
             instr_cycles = cpu.clock()
+            bus.apu.clock_n(instr_cycles)
             total_cpu_cycles += instr_cycles
             cycles_this_frame += instr_cycles
 
             if bus.ppu.nmi:
                 bus.ppu.nmi = False
                 nmi_cycles = cpu.nmi()
+                bus.apu.clock_n(nmi_cycles)
                 total_cpu_cycles += nmi_cycles
                 cycles_this_frame += nmi_cycles
             
             if bus.cartridge.mapper.irq_active:
+                bus.cartridge.mapper.irq_active = False # Manual clear to prevent deadlock
                 irq_cycles = cpu.irq()
+                bus.apu.clock_n(irq_cycles)
                 total_cpu_cycles += irq_cycles
                 cycles_this_frame += irq_cycles
 

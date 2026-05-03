@@ -254,7 +254,8 @@ cdef class PPU:
         sprite_size = 16 if (self.ppu_ctrl & 0x20) else 8
         for i in range(64):
             y = self.oam_vram[i * 4]
-            diff = self.scanline - (y + 1)
+            # Corrected for cycle-accurate path: Evaluate for NEXT scanline
+            diff = self.scanline - y
             if 0 <= diff < sprite_size:
                 if self.sprite_count < 8:
                     if i == 0: self.sprite_zero_hit_possible = True
@@ -275,7 +276,8 @@ cdef class PPU:
             tile_id = self.secondary_oam[i * 4 + 1]
             attr = self.secondary_oam[i * 4 + 2]
             x = self.secondary_oam[i * 4 + 3]
-            row = self.scanline - (y + 1)
+            # Corrected for cycle-accurate path: Fetch for NEXT scanline
+            row = self.scanline - y
             if attr & 0x80: row = (sprite_size - 1) - row
             if sprite_size == 8:
                 addr = table * 0x1000 + tile_id * 16 + row

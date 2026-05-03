@@ -3,12 +3,14 @@ import array
 from .cartridge import Cartridge
 from .ppu import PPU
 from .controller import Controller
+from .apu import APU
 
 class Bus:
     def __init__(self):
         self.ram = array.array('B', bytearray(2*1024))
         self._cartridge: Optional[Cartridge] = None
         self.ppu = PPU()
+        self.apu = APU()
         self.controllers = [Controller(), Controller()]
 
     @property
@@ -36,9 +38,12 @@ class Bus:
             base_addr = data << 8
             for i in range(256):
                 self.ppu.oam_vram[i] = self.read(base_addr + i)
-        elif addr == 0x4016:
-            self.controllers[0].write(data)
-            self.controllers[1].write(data)
+        elif 0x4000 <= addr <= 0x4017:
+            if addr == 0x4016:
+                self.controllers[0].write(data)
+                self.controllers[1].write(data)
+            else:
+                self.apu.cpu_write(addr, data)
 
     def read(self, addr):
         if addr >= 0x4020:
@@ -47,8 +52,11 @@ class Bus:
             return self.ram[addr & 0x07FF]
         elif addr <= 0x3FFF:
             return self.ppu.cpu_read(addr)
-        elif addr == 0x4016:
-            return self.controllers[0].read()
-        elif addr == 0x4017:
-            return self.controllers[1].read()
+        elif 0x4000 <= addr <= 0x4017:
+            if addr == 0x4016:
+                return self.controllers[0].read()
+            elif addr == 0x4017:
+                return self.controllers[1].read()
+            else:
+                return self.apu.cpu_read(addr)
         return 0
