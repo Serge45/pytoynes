@@ -7,7 +7,7 @@ from pytoynes.bus import Bus
 from pytoynes.rom import Rom
 from pytoynes.mos6502 import MOS6502
 from pytoynes.cartridge import Cartridge
-from pytoynes.ui.memoryview import draw_memory_view, draw_status_bits, draw_program_counter, draw_registers, draw_pattern_table, draw_ppu_screen, draw_fps
+from pytoynes.ui.memoryview import draw_memory_view, draw_status_bits, draw_program_counter, draw_registers, draw_pattern_table, draw_ppu_screen, draw_fps, draw_apu_waveform
 from pytoynes.controller import *
 
 def main():
@@ -46,8 +46,9 @@ def main():
     dbg_pc_rect = pygame.Rect(10, 384, 400, 32)
     dbg_reg_rect = pygame.Rect(10, 416, 400, 64)
     dbg_fps_rect = pygame.Rect(10, 480, 400, 32)
-    dbg_pt0_rect = pygame.Rect(10, 520, 200, 200)
-    dbg_pt1_rect = pygame.Rect(210, 520, 200, 200)
+    dbg_apu_rect = pygame.Rect(10, 520, 400, 60)
+    dbg_pt0_rect = pygame.Rect(10, 590, 200, 200)
+    dbg_pt1_rect = pygame.Rect(210, 590, 200, 200)
 
     font = pygame.font.SysFont(None, 16)
     clock = pygame.time.Clock()
@@ -64,9 +65,9 @@ def main():
 
     def open_debug_window():
         nonlocal debug_window, debug_renderer, debug_surf
-        debug_window = SDLWindow('Debug - Pytoynes', (420, 740))
+        debug_window = SDLWindow('Debug - Pytoynes', (420, 820))
         debug_renderer = Renderer(debug_window)
-        debug_surf = pygame.Surface((420, 740))
+        debug_surf = pygame.Surface((420, 820))
 
     def close_debug_window():
         nonlocal debug_window, debug_renderer, debug_surf, debug_mode
@@ -159,6 +160,7 @@ def main():
             draw_program_counter(cpu, dbg_pc_rect, debug_surf, font)
             draw_registers(cpu, dbg_reg_rect, debug_surf, font)
             draw_fps(clock, bus.ppu.frame_count, dbg_fps_rect, debug_surf, font, emu_fps)
+            draw_apu_waveform(bus, dbg_apu_rect, debug_surf)
 
             debug_tex = Texture.from_surface(debug_renderer, debug_surf)
             debug_renderer.clear()

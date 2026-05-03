@@ -121,3 +121,27 @@ def draw_ppu_screen(bus: Bus, rect: pygame.Rect, dst_surf: pygame.Surface):
 def draw_fps(clock: pygame.time.Clock, ppu_frames: int, rect: pygame.Rect, dst_surf: pygame.Surface, font: pygame.font.Font, emu_fps: float = 0.0):
     fps_surf = font.render(f'EmuFPS: {emu_fps:.1f} (Frames: {ppu_frames})', False, (255, 255, 0))
     dst_surf.blit(fps_surf, (rect.x, rect.y))
+
+def draw_apu_waveform(bus: Bus, rect: pygame.Rect, dst_surf: pygame.Surface):
+    apu = bus.apu
+    samples = np.frombuffer(apu.pulse1_samples, dtype=np.uint8)
+    ptr = apu.sample_ptr
+    
+    # Re-order ring buffer
+    ordered_samples = np.concatenate((samples[ptr:], samples[:ptr]))
+    
+    pygame.draw.rect(dst_surf, (50, 50, 50), rect) # Background
+    
+    points = []
+    w = rect.width
+    h = rect.height
+    y_center = rect.y + h // 2
+    y_scale = h // 4
+    
+    for i in range(256):
+        x = rect.x + (i * w) // 256
+        y = y_center - (1 if ordered_samples[i] else -1) * y_scale
+        points.append((x, y))
+        
+    if len(points) > 1:
+        pygame.draw.lines(dst_surf, (0, 255, 0), False, points, 2)
