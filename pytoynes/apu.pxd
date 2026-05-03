@@ -9,6 +9,12 @@ cdef class APU:
     cdef public int pulse1_duty_step
     cdef public int pulse1_timer_reload
     cdef public int pulse1_timer_value
+    cdef public int pulse1_lc_value
+    cdef public bint pulse1_lc_halt
+
+    cdef public int frame_counter_mode
+    cdef public int frame_counter_step
+    cdef public int frame_counter_cycles
     
     cdef public int clock_divider
     cdef public long long total_cycles
@@ -21,3 +27,5 @@ cdef class APU:
     cpdef int cpu_read(self, int addr)
     cpdef void cpu_write(self, int addr, int data)
     cpdef int get_pulse1_sample(self)
+    cdef void _clock_quarter_frame(self)
+    cdef void _clock_half_frame(self)
