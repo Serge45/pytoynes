@@ -29,6 +29,14 @@ class APU:
         self.pulse1_lc_value = 0
         self.pulse1_lc_halt = False
         
+        # Envelope
+        self.pulse1_env_loop = False
+        self.pulse1_env_const = False
+        self.pulse1_env_vol_period = 0
+        self.pulse1_env_start = False
+        self.pulse1_env_divider = 0
+        self.pulse1_env_decay = 0
+
         # Frame Counter State
         self.frame_counter_mode = 0
         self.frame_counter_step = 0
@@ -41,6 +49,12 @@ class APU:
         # Ring buffer for visualization
         self.pulse1_samples = bytearray(256)
         self.sample_ptr = 0
+        
+        # Audio Buffer
+        self.audio_buffer = [0.0] * 2048
+        self.audio_ptr = 0
+        self.cycle_acc = 0
+        self.cycles_per_sample = 40.584
 
     def clock(self):
         self.total_cycles += 1
@@ -56,8 +70,6 @@ class APU:
 
         # Frame Counter (~240Hz)
         self.frame_counter_cycles += 1
-        # In NTSC, a quarter frame is approx 3728.5 CPU cycles
-        # Step 1: 3728, Step 2: 7456, Step 3: 11185, Step 4: 14914
         if self.frame_counter_mode == 0: # 4-step mode
             if self.frame_counter_cycles == 3728: self._clock_quarter_frame()
             elif self.frame_counter_cycles == 7456: self._clock_half_frame()
@@ -69,28 +81,51 @@ class APU:
             if self.frame_counter_cycles == 3728: self._clock_quarter_frame()
             elif self.frame_counter_cycles == 7456: self._clock_half_frame()
             elif self.frame_counter_cycles == 11185: self._clock_quarter_frame()
-            elif self.frame_counter_cycles == 14914: pass # nothing
+            elif self.frame_counter_cycles == 14914: pass
             elif self.frame_counter_cycles == 18640:
                 self._clock_half_frame()
                 self.frame_counter_cycles = 0
 
         # Sample for visualization
-        self.pulse1_samples[self.sample_ptr] = self.get_pulse1_sample()
+        raw_sample = self.get_pulse1_sample()
+        self.pulse1_samples[self.sample_ptr] = raw_sample
         self.sample_ptr = (self.sample_ptr + 1) & 0xFF
+        
+        # Audio Sampling
+        self.cycle_acc += 1
+        if self.cycle_acc >= self.cycles_per_sample:
+            self.cycle_acc -= self.cycles_per_sample
+            if self.audio_ptr < 2048:
+                vol = self.pulse1_env_decay if not self.pulse1_env_const else self.pulse1_env_vol_period
+                self.audio_buffer[self.audio_ptr] = (float(raw_sample) * (vol / 15.0)) * 0.5
+                self.audio_ptr += 1
 
     def _clock_quarter_frame(self):
-        # Clock Envelopes (Phase 2 part 2)
-        pass
+        # Clock Envelopes
+        if self.pulse1_env_start:
+            self.pulse1_env_start = False
+            self.pulse1_env_decay = 15
+            self.pulse1_env_divider = self.pulse1_env_vol_period
+        else:
+            if self.pulse1_env_divider == 0:
+                self.pulse1_env_divider = self.pulse1_env_vol_period
+                if self.pulse1_env_decay > 0:
+                    self.pulse1_env_decay -= 1
+                elif self.pulse1_env_loop:
+                    self.pulse1_env_decay = 15
+            else:
+                self.pulse1_env_divider -= 1
 
     def _clock_half_frame(self):
         self._clock_quarter_frame()
         # Clock Length Counters
         if self.pulse1_lc_value > 0 and not self.pulse1_lc_halt:
             self.pulse1_lc_value -= 1
-        # Clock Sweeps (Phase 2 part 2)
 
     def get_pulse1_sample(self):
         if not self.pulse1_enabled or self.pulse1_lc_value == 0:
+            return 0
+        if self.pulse1_timer_reload < 8:
             return 0
         return self.DUTY_TABLE[self.pulse1_duty_mode][self.pulse1_duty_step]
 
@@ -98,7 +133,6 @@ class APU:
         if addr == 0x4015:
             data = 0
             if self.pulse1_lc_value > 0: data |= 0x01
-            # Other channels stubs
             return data
         return 0
 
@@ -106,14 +140,18 @@ class APU:
         if addr == 0x4000:
             self.pulse1_duty_mode = (data >> 6) & 0x03
             self.pulse1_lc_halt = (data & 0x20) != 0
+            self.pulse1_env_loop = (data & 0x20) != 0
+            self.pulse1_env_const = (data & 0x10) != 0
+            self.pulse1_env_vol_period = data & 0x0F
         elif addr == 0x4002:
             self.pulse1_timer_reload = (self.pulse1_timer_reload & 0x0700) | data
         elif addr == 0x4003:
             self.pulse1_timer_reload = (self.pulse1_timer_reload & 0x00FF) | ((data & 0x07) << 8)
-            self.pulse1_timer_value = self.pulse1_timer_reload
+            # self.pulse1_timer_value = self.pulse1_timer_reload
             self.pulse1_duty_step = 0
             if self.pulse1_enabled:
                 self.pulse1_lc_value = self.LENGTH_TABLE[(data >> 3) & 0x1F]
+            self.pulse1_env_start = True
         elif addr == 0x4015:
             self.pulse1_enabled = (data & 0x01) != 0
             if not self.pulse1_enabled: self.pulse1_lc_value = 0
@@ -126,3 +164,8 @@ class APU:
             self.frame_counter_cycles = 0
             if self.frame_counter_mode == 1:
                 self._clock_half_frame()
+
+    def flush_audio(self, out):
+        count = min(self.audio_ptr, len(out))
+        out[:count] = self.audio_buffer[:count]
+        self.audio_ptr = 0

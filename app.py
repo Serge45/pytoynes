@@ -35,6 +35,12 @@ def main():
 
     pygame.display.init()
     pygame.font.init()
+    try:
+        pygame.mixer.init(frequency=44100, size=-16, channels=1, buffer=512)
+        audio_enabled = True
+    except pygame.error:
+        print("Warning: Could not initialize audio.")
+        audio_enabled = False
 
     screen = pygame.display.set_mode((768, 720))
     pygame.display.set_caption(f"Pytoynes - {rom_path}")
@@ -138,6 +144,15 @@ def main():
 
             bus.ppu.run_to(total_cpu_cycles * 3)
 
+        # Audio Output
+        if audio_enabled:
+            audio_data = np.zeros(1024, dtype=np.float32)
+            bus.apu.flush_audio(audio_data)
+            # Normalize to 16-bit signed for standard Pygame sound
+            audio_int = (audio_data[:735] * 32767).astype(np.int16)
+            sound_chunk = pygame.sndarray.make_sound(audio_int)
+            pygame.mixer.Channel(0).queue(sound_chunk)
+            
         # Render main window
         now = pygame.time.get_ticks()
         elapsed_ms = now - last_emu_fps_time

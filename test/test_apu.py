@@ -20,12 +20,15 @@ class TestAPU(unittest.TestCase):
         apu = APU()
         apu.cpu_write(0x4015, 0x01)
         apu.cpu_write(0x4000, 0x80) # 50%
-        apu.cpu_write(0x4002, 0x01)
+        # Timer 8 -> ticks every (8+1)*2 = 18 CPU cycles
+        apu.cpu_write(0x4002, 0x08)
         apu.cpu_write(0x4003, 0x00) # Length index 0 (10)
         
         # Step 0
         self.assertEqual(apu.get_pulse1_sample(), 0)
-        apu.clock_n(4)
+        
+        # Clock 18 times -> Should advance to step 1
+        apu.clock_n(18)
         self.assertEqual(apu.get_pulse1_sample(), 1)
 
     def test_length_counter_decrement(self):
