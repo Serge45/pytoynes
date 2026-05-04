@@ -1,6 +1,7 @@
 import time
 import pygame
 from pygame._sdl2.video import Window as SDLWindow, Renderer, Texture
+import numpy as np
 import sys
 import os
 from pytoynes.bus import Bus
@@ -38,9 +39,12 @@ def main():
     try:
         pygame.mixer.init(frequency=44100, size=-16, channels=1, buffer=512)
         audio_enabled = True
+        _mixer_conf = pygame.mixer.get_init()
+        audio_channels = _mixer_conf[2] if _mixer_conf else 1
     except pygame.error:
         print("Warning: Could not initialize audio.")
         audio_enabled = False
+        audio_channels = 1
 
     screen = pygame.display.set_mode((768, 720))
     pygame.display.set_caption(f"Pytoynes - {rom_path}")
@@ -150,6 +154,8 @@ def main():
             bus.apu.flush_audio(audio_data)
             # Normalize to 16-bit signed for standard Pygame sound
             audio_int = (audio_data[:735] * 32767).astype(np.int16)
+            if audio_channels == 2:
+                audio_int = np.repeat(audio_int[:, np.newaxis], 2, axis=1)
             sound_chunk = pygame.sndarray.make_sound(audio_int)
             pygame.mixer.Channel(0).queue(sound_chunk)
             
