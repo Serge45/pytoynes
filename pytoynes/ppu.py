@@ -158,41 +158,7 @@ class PPU:
 
     def run_to(self, target_total_cycles: int):
         while self.total_cycles < target_total_cycles:
-            if self.cycle == 0:
-                if 0 <= self.scanline <= 239:
-                    # Fast path: render one visible scanline
-                    self._render_scanline_fast()
-                    if self.cartridge is not None:
-                        self.cartridge.mapper.count_scanline()
-                    self.total_cycles += 341
-                    self.scanline += 1
-                    if self.scanline == 241:
-                        self.ppu_status |= 0x80
-                        if self.ppu_ctrl & 0x80: self.nmi = True
-                elif 240 <= self.scanline <= 260:
-                    # Fast path: skip VBlank scanline (no rendering)
-                    if self.cartridge is not None:
-                        self.cartridge.mapper.count_scanline()
-                    self.total_cycles += 341
-                    self.scanline += 1
-                    if self.scanline == 241:
-                        self.ppu_status |= 0x80
-                        if self.ppu_ctrl & 0x80: self.nmi = True
-                elif self.scanline >= 261:
-                    # Fast path: end of frame
-                    if self.cartridge is not None:
-                        self.cartridge.mapper.count_scanline()
-                    self.total_cycles += 341
-                    self.scanline = -1
-                    self.frame_count += 1
-                    self.ppu_status &= ~0xC0
-                    self.nmi = False
-                    self.is_odd_frame = not self.is_odd_frame
-                else:
-                    # scanline == -1 mid-scanline: slow path for scroll resets
-                    self.clock()
-            else:
-                self.clock()
+            self.clock()
 
     def _render_scanline_fast(self):
         ppu_mask = self.ppu_mask

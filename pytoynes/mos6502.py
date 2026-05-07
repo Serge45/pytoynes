@@ -327,10 +327,9 @@ class MOS6502:
         self._fetch_from_mem = True
         extra1 = addr()
         extra2 = comp()
-        
-        total_cycles = cycles + (extra1 & extra2)
-        return total_cycles
 
+        total_cycles = cycles + extra1 + extra2
+        return total_cycles
     def fetch(self):
         if self._fetch_from_mem:
             self.fetched = self.bus.read(self.abs_addr)
@@ -389,10 +388,12 @@ class MOS6502:
 
     def _branch_if(self, cond: bool):
         if cond is True:
-            self.cycle += 1
+            extra_cycles = 1
             self.abs_addr = (self.pc + self.rel_addr) & 0xFFFF
-            if (self.abs_addr & 0xFF00) != (self.pc & 0xFF00): self.cycle += 1
+            if (self.abs_addr & 0xFF00) != (self.pc & 0xFF00):
+                extra_cycles += 1
             self.pc = self.abs_addr
+            return extra_cycles
         return 0
 
     def _get_status(self, flag: Status):

@@ -150,14 +150,32 @@ def main():
 
         # Audio Output
         if audio_enabled:
-            audio_data = np.zeros(1024, dtype=np.float32)
-            bus.apu.flush_audio(audio_data)
-            # Normalize to 16-bit signed for standard Pygame sound
-            audio_int = (audio_data[:735] * 32767).astype(np.int16)
-            if audio_channels == 2:
-                audio_int = np.repeat(audio_int[:, np.newaxis], 2, axis=1)
-            sound_chunk = pygame.sndarray.make_sound(audio_int)
-            pygame.mixer.Channel(0).queue(sound_chunk)
+            audio_data = np.zeros(2048, dtype=np.float32)
+            num_samples = bus.apu.flush_audio(audio_data)
+            if num_samples > 0:
+                # Normalize to 16-bit signed for standard Pygame sound
+                audio_int = (audio_data[:num_samples] * 32767).astype(np.int16)
+                if audio_channels == 2:
+                    audio_int = np.repeat(audio_int[:, np.newaxis], 2, axis=1)
+                sound_chunk = pygame.sndarray.make_sound(audio_int)
+                
+                # Audio Sync: Wait if a chunk is already queued to prevent overflow/crackling
+                channel = pygame.mixer.Channel(0)
+                if not channel.get_busy():
+                    # If channel is idle, start it with a dummy sound or the first chunk
+                    # but usually, queue() starts it. We'll ensure it's playing.
+                    pass 
+
+                wait_start = pygame.time.get_ticks()
+                while channel.get_queue():
+                    pygame.time.wait(1)
+                    if pygame.time.get_ticks() - wait_start > 100: # 100ms safety timeout
+                        break
+                
+                if not channel.get_busy():
+                    channel.play(sound_chunk)
+                else:
+                    channel.queue(sound_chunk)
             
         # Render main window
         now = pygame.time.get_ticks()
@@ -188,7 +206,8 @@ def main():
             debug_tex.draw()
             debug_renderer.present()
 
-        clock.tick(60)
+        if not audio_enabled:
+            clock.tick(60)
         frame_count += 1
 
     close_debug_window()

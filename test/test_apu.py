@@ -39,10 +39,10 @@ class TestAPU(unittest.TestCase):
         self.assertEqual(apu.pulse1_lc_value, 2)
         
         # 4-step mode (default)
-        # Half frame at 7456 and 14914
-        apu.clock_n(7456)
+        # Half frame at 14913 and 29829
+        apu.clock_n(14913)
         self.assertEqual(apu.pulse1_lc_value, 1)
-        apu.clock_n(7458) # Total 14914
+        apu.clock_n(14916) # Total 29829
         self.assertEqual(apu.pulse1_lc_value, 0)
         self.assertEqual(apu.get_pulse1_sample(), 0)
         self.assertEqual(apu.cpu_read(0x4015), 0)
