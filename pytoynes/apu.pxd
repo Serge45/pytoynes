@@ -29,6 +29,22 @@ cdef class APU:
     cdef public bint tri_linear_reload_flag
     cdef public int tri_step
 
+    # Pulse 1 Sweep
+    cdef public bint p1_sweep_enabled
+    cdef public int p1_sweep_period
+    cdef public bint p1_sweep_negate
+    cdef public int p1_sweep_shift
+    cdef public bint p1_sweep_reload
+    cdef public int p1_sweep_divider
+
+    # Pulse 2 Sweep
+    cdef public bint p2_sweep_enabled
+    cdef public int p2_sweep_period
+    cdef public bint p2_sweep_negate
+    cdef public int p2_sweep_shift
+    cdef public bint p2_sweep_reload
+    cdef public int p2_sweep_divider
+
     # Noise State
     cdef public int noise_timer_reload
     cdef public int noise_timer_value
@@ -82,4 +98,8 @@ cdef class APU:
     cpdef int get_pulse1_sample(self)
     cdef void _clock_quarter_frame(self)
     cdef void _clock_half_frame(self)
+    cdef int _calculate_p1_target_period(self)
+    cdef int _calculate_p2_target_period(self)
+    cdef void _clock_p1_sweep(self)
+    cdef void _clock_p2_sweep(self)
     cpdef int flush_audio(self, float[:] out)

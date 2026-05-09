@@ -58,6 +58,22 @@ class APU:
         self.pulse2_env_divider = 0
         self.pulse2_env_decay = 0
 
+        # Pulse 1 Sweep
+        self.p1_sweep_enabled = False
+        self.p1_sweep_period = 0
+        self.p1_sweep_negate = False
+        self.p1_sweep_shift = 0
+        self.p1_sweep_reload = False
+        self.p1_sweep_divider = 0
+
+        # Pulse 2 Sweep
+        self.p2_sweep_enabled = False
+        self.p2_sweep_period = 0
+        self.p2_sweep_negate = False
+        self.p2_sweep_shift = 0
+        self.p2_sweep_reload = False
+        self.p2_sweep_divider = 0
+
         # Triangle State
         self.tri_timer_reload = 0
         self.tri_timer_value = 0
@@ -160,12 +176,14 @@ class APU:
             
             # Pulse 1 Sample
             raw_sample1 = 0
-            if self.pulse1_enabled and self.pulse1_lc_value > 0 and self.pulse1_timer_reload >= 8:
+            tp1 = self._calculate_p1_target_period()
+            if self.pulse1_enabled and self.pulse1_lc_value > 0 and self.pulse1_timer_reload >= 8 and tp1 <= 0x7FF:
                 raw_sample1 = self.DUTY_TABLE[self.pulse1_duty_mode][self.pulse1_duty_step]
             
             # Pulse 2 Sample
             raw_sample2 = 0
-            if self.pulse2_enabled and self.pulse2_lc_value > 0 and self.pulse2_timer_reload >= 8:
+            tp2 = self._calculate_p2_target_period()
+            if self.pulse2_enabled and self.pulse2_lc_value > 0 and self.pulse2_timer_reload >= 8 and tp2 <= 0x7FF:
                 raw_sample2 = self.DUTY_TABLE[self.pulse2_duty_mode][self.pulse2_duty_step]
 
             # Triangle Sample
@@ -250,10 +268,48 @@ class APU:
 
     def _clock_half_frame(self):
         self._clock_quarter_frame()
+        self._clock_p1_sweep()
+        self._clock_p2_sweep()
         if self.pulse1_lc_value > 0 and not self.pulse1_lc_halt: self.pulse1_lc_value -= 1
         if self.pulse2_lc_value > 0 and not self.pulse2_lc_halt: self.pulse2_lc_value -= 1
         if self.tri_lc_value > 0 and not self.tri_lc_halt: self.tri_lc_value -= 1
         if self.noise_lc_value > 0 and not self.noise_lc_halt: self.noise_lc_value -= 1
+
+    def _calculate_p1_target_period(self):
+        period = self.pulse1_timer_reload
+        delta = period >> self.p1_sweep_shift
+        if self.p1_sweep_negate:
+            return period - delta - 1
+        return period + delta
+
+    def _calculate_p2_target_period(self):
+        period = self.pulse2_timer_reload
+        delta = period >> self.p2_sweep_shift
+        if self.p2_sweep_negate:
+            return period - delta
+        return period + delta
+
+    def _clock_p1_sweep(self):
+        if self.p1_sweep_divider == 0 and self.p1_sweep_enabled and self.p1_sweep_shift > 0:
+            target = self._calculate_p1_target_period()
+            if target <= 0x7FF and self.pulse1_timer_reload >= 8:
+                self.pulse1_timer_reload = target
+        if self.p1_sweep_divider == 0 or self.p1_sweep_reload:
+            self.p1_sweep_divider = self.p1_sweep_period
+            self.p1_sweep_reload = False
+        else:
+            self.p1_sweep_divider -= 1
+
+    def _clock_p2_sweep(self):
+        if self.p2_sweep_divider == 0 and self.p2_sweep_enabled and self.p2_sweep_shift > 0:
+            target = self._calculate_p2_target_period()
+            if target <= 0x7FF and self.pulse2_timer_reload >= 8:
+                self.pulse2_timer_reload = target
+        if self.p2_sweep_divider == 0 or self.p2_sweep_reload:
+            self.p2_sweep_divider = self.p2_sweep_period
+            self.p2_sweep_reload = False
+        else:
+            self.p2_sweep_divider -= 1
 
     def cpu_read(self, addr):
         data = 0
@@ -272,6 +328,12 @@ class APU:
             self.pulse1_lc_halt = self.pulse1_env_loop = (data & 0x20) != 0
             self.pulse1_env_const = (data & 0x10) != 0
             self.pulse1_env_vol_period = data & 0x0F
+        elif addr == 0x4001:
+            self.p1_sweep_enabled = (data & 0x80) != 0
+            self.p1_sweep_period = (data >> 4) & 0x07
+            self.p1_sweep_negate = (data & 0x08) != 0
+            self.p1_sweep_shift = data & 0x07
+            self.p1_sweep_reload = True
         elif addr == 0x4002: self.pulse1_timer_reload = (self.pulse1_timer_reload & 0x0700) | data
         elif addr == 0x4003:
             self.pulse1_timer_reload = (self.pulse1_timer_reload & 0x00FF) | ((data & 0x07) << 8)
@@ -286,6 +348,12 @@ class APU:
             self.pulse2_lc_halt = self.pulse2_env_loop = (data & 0x20) != 0
             self.pulse2_env_const = (data & 0x10) != 0
             self.pulse2_env_vol_period = data & 0x0F
+        elif addr == 0x4005:
+            self.p2_sweep_enabled = (data & 0x80) != 0
+            self.p2_sweep_period = (data >> 4) & 0x07
+            self.p2_sweep_negate = (data & 0x08) != 0
+            self.p2_sweep_shift = data & 0x07
+            self.p2_sweep_reload = True
         elif addr == 0x4006: self.pulse2_timer_reload = (self.pulse2_timer_reload & 0x0700) | data
         elif addr == 0x4007:
             self.pulse2_timer_reload = (self.pulse2_timer_reload & 0x00FF) | ((data & 0x07) << 8)
@@ -315,7 +383,8 @@ class APU:
             self.noise_mode = (data & 0x80) != 0
             self.noise_timer_reload = self.NOISE_TABLE[data & 0x0F]
         elif addr == 0x400F:
-            if self.noise_enabled: self.noise_lc_value = self.LENGTH_TABLE[(data >> 3) & 0x1F]
+            if self.noise_enabled:
+                self.noise_lc_value = self.LENGTH_TABLE[(data >> 3) & 0x1F]
             self.noise_env_start = True
 
         elif addr == 0x4015:
@@ -344,8 +413,9 @@ class APU:
         return count
 
     def get_pulse1_sample(self):
+        tp1 = self._calculate_p1_target_period()
         if not self.pulse1_enabled or self.pulse1_lc_value == 0:
             return 0
-        if self.pulse1_timer_reload < 8:
+        if self.pulse1_timer_reload < 8 or tp1 > 0x7FF:
             return 0
         return self.DUTY_TABLE[self.pulse1_duty_mode][self.pulse1_duty_step]
