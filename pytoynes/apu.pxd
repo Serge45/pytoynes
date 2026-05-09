@@ -19,6 +19,30 @@ cdef class APU:
     cdef public int pulse2_lc_value
     cdef public bint pulse2_lc_halt
 
+    # Triangle State
+    cdef public int tri_timer_reload
+    cdef public int tri_timer_value
+    cdef public int tri_lc_value
+    cdef public bint tri_lc_halt
+    cdef public int tri_linear_reload
+    cdef public int tri_linear_value
+    cdef public bint tri_linear_reload_flag
+    cdef public int tri_step
+
+    # Noise State
+    cdef public int noise_timer_reload
+    cdef public int noise_timer_value
+    cdef public int noise_shift_reg
+    cdef public bint noise_mode
+    cdef public int noise_lc_value
+    cdef public bint noise_lc_halt
+    cdef public bint noise_env_loop
+    cdef public bint noise_env_const
+    cdef public int noise_env_vol_period
+    cdef public bint noise_env_start
+    cdef public int noise_env_divider
+    cdef public int noise_env_decay
+
     # Pulse 1 Envelope
     cdef public bint pulse1_env_loop
     cdef public bint pulse1_env_const
