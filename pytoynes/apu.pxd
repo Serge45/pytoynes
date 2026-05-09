@@ -78,6 +78,8 @@ cdef class APU:
     cdef public int frame_counter_mode
     cdef public int frame_counter_step
     cdef public int frame_counter_cycles
+    cdef public bint frame_irq_active
+    cdef public bint frame_irq_inhibit
     
     cdef public int clock_divider
     cdef public long long total_cycles

@@ -102,6 +102,8 @@ class APU:
         self.frame_counter_mode = 0
         self.frame_counter_step = 0
         self.frame_counter_cycles = 0
+        self.frame_irq_active = False
+        self.frame_irq_inhibit = False
 
         # Internal Timing
         self.total_cycles = 0
@@ -157,8 +159,11 @@ class APU:
             if self.frame_counter_cycles == 7457: self._clock_quarter_frame()
             elif self.frame_counter_cycles == 14913: self._clock_half_frame()
             elif self.frame_counter_cycles == 22371: self._clock_quarter_frame()
+            elif self.frame_counter_cycles == 29828:
+                if not self.frame_irq_inhibit: self.frame_irq_active = True
             elif self.frame_counter_cycles == 29829:
                 self._clock_half_frame()
+                if not self.frame_irq_inhibit: self.frame_irq_active = True
                 self.frame_counter_cycles = 0
         else:
             if self.frame_counter_cycles == 7457: self._clock_quarter_frame()
@@ -318,6 +323,8 @@ class APU:
             if self.pulse2_lc_value > 0: data |= 0x02
             if self.tri_lc_value > 0: data |= 0x04
             if self.noise_lc_value > 0: data |= 0x08
+            if self.frame_irq_active: data |= 0x40
+            self.frame_irq_active = False
             return data
         return 0
 
@@ -399,6 +406,8 @@ class APU:
             self.dmc_enabled = (data & 0x10) != 0
         elif addr == 0x4017:
             self.frame_counter_mode = (data >> 7) & 0x01
+            self.frame_irq_inhibit = (data & 0x40) != 0
+            if self.frame_irq_inhibit: self.frame_irq_active = False
             self.frame_counter_cycles = 0
             if self.frame_counter_mode == 1: self._clock_half_frame()
 

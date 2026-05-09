@@ -145,6 +145,14 @@ def main():
                 bus.apu.clock_n(irq_cycles)
                 total_cpu_cycles += irq_cycles
                 cycles_this_frame += irq_cycles
+            
+            if bus.apu.frame_irq_active:
+                # Frame IRQ does NOT clear itself automatically (cleared on read $4015)
+                # But to avoid immediate re-trigger in this loop, we handle it once
+                irq_cycles = cpu.irq()
+                bus.apu.clock_n(irq_cycles)
+                total_cpu_cycles += irq_cycles
+                cycles_this_frame += irq_cycles
 
             bus.ppu.run_to(total_cpu_cycles * 3)
 
