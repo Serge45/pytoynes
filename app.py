@@ -154,6 +154,13 @@ def main():
                 total_cpu_cycles += irq_cycles
                 cycles_this_frame += irq_cycles
 
+            if bus.apu.dmc_irq_active:
+                # DMC IRQ is cleared on read $4015 or write $4010
+                irq_cycles = cpu.irq()
+                bus.apu.clock_n(irq_cycles)
+                total_cpu_cycles += irq_cycles
+                cycles_this_frame += irq_cycles
+
             bus.ppu.run_to(total_cpu_cycles * 3)
 
         # Audio Output

@@ -22,7 +22,12 @@ class APU:
         4, 8, 16, 32, 64, 96, 128, 160, 202, 254, 380, 508, 762, 1016, 2034, 4068
     ]
 
+    DMC_TABLE = [
+        428, 380, 340, 320, 286, 254, 226, 214, 190, 160, 142, 128, 106, 84, 72, 54
+    ]
+
     def __init__(self):
+        self.bus = None
         # Channel Enable Status (Register 0x4015)
         self.pulse1_enabled = False
         self.pulse2_enabled = False
@@ -98,6 +103,24 @@ class APU:
         self.noise_env_divider = 0
         self.noise_env_decay = 0
 
+        # DMC State
+        self.dmc_irq_enabled = False
+        self.dmc_loop = False
+        self.dmc_rate_index = 0
+        self.dmc_direct_load = 0
+        self.dmc_sample_addr = 0
+        self.dmc_sample_len = 0
+        self.dmc_current_addr = 0
+        self.dmc_bytes_remaining = 0
+        self.dmc_sample_buffer = 0
+        self.dmc_buffer_full = False
+        self.dmc_shift_reg = 0
+        self.dmc_bits_remaining = 0
+        self.dmc_timer_value = 0
+        self.dmc_timer_reload = 0
+        self.dmc_irq_active = False
+        self.dmc_silence_flag = True
+
         # Frame Counter (~240Hz)
         self.frame_counter_mode = 0
         self.frame_counter_step = 0
@@ -118,6 +141,9 @@ class APU:
         self.audio_ptr = 0
         self.cycle_acc = 0
         self.cycles_per_sample = 40.584
+
+    def connect_bus(self, bus):
+        self.bus = bus
 
     def clock(self):
         self.total_cycles += 1
@@ -153,7 +179,29 @@ class APU:
         else:
             self.tri_timer_value -= 1
 
-        # 3. Frame Counter Clock (NTSC: ~240Hz)
+        # 3. DMC Clock
+        if self.dmc_timer_value == 0:
+            self.dmc_timer_value = self.dmc_timer_reload
+            if not self.dmc_silence_flag:
+                if self.dmc_shift_reg & 0x01:
+                    if self.dmc_direct_load <= 125: self.dmc_direct_load += 2
+                else:
+                    if self.dmc_direct_load >= 2: self.dmc_direct_load -= 2
+            self.dmc_shift_reg >>= 1
+            self.dmc_bits_remaining -= 1
+            if self.dmc_bits_remaining <= 0:
+                self.dmc_bits_remaining = 8
+                if not self.dmc_buffer_full:
+                    self.dmc_silence_flag = True
+                else:
+                    self.dmc_silence_flag = False
+                    self.dmc_shift_reg = self.dmc_sample_buffer
+                    self.dmc_buffer_full = False
+                    self._dmc_fetch_sample()
+        else:
+            self.dmc_timer_value -= 1
+
+        # 4. Frame Counter Clock (NTSC: ~240Hz)
         self.frame_counter_cycles += 1
         if self.frame_counter_mode == 0:
             if self.frame_counter_cycles == 7457: self._clock_quarter_frame()
@@ -174,7 +222,7 @@ class APU:
                 self._clock_half_frame()
                 self.frame_counter_cycles = 0
 
-        # 4. Audio Resampling (Sample every ~40.58 CPU cycles)
+        # 5. Audio Resampling (Sample every ~40.58 CPU cycles)
         self.cycle_acc += 1000
         if self.cycle_acc >= 40584: # Fixed point 1000 * 40.584
             self.cycle_acc -= 40584
@@ -220,13 +268,28 @@ class APU:
                 n_vol = self.noise_env_decay if not self.noise_env_const else self.noise_env_vol_period
                 s_tri = float(raw_sample_tri)
                 s_noise = float(raw_sample_noise * n_vol)
+                s_dmc = float(self.dmc_direct_load)
                 tnd_out = 0.0
-                tnd_denom = (s_tri / 8227.0) + (s_noise / 12241.0)
+                tnd_denom = (s_tri / 8227.0) + (s_noise / 12241.0) + (s_dmc / 22638.0)
                 if tnd_denom > 0:
                     tnd_out = 159.79 / ((1.0 / tnd_denom) + 100.0)
                 
-                self.audio_buffer[self.audio_ptr] = (pulse_out + tnd_out)
+                self.audio_buffer[self.audio_ptr] = (pulse_out + tnd_out) - 0.1
                 self.audio_ptr += 1
+
+    def _dmc_fetch_sample(self):
+        if self.dmc_bytes_remaining > 0 and not self.dmc_buffer_full:
+            if self.bus is not None:
+                self.dmc_sample_buffer = self.bus.read(self.dmc_current_addr)
+                self.dmc_buffer_full = True
+                self.dmc_current_addr = (self.dmc_current_addr + 1) | 0x8000
+                self.dmc_bytes_remaining -= 1
+                if self.dmc_bytes_remaining == 0:
+                    if self.dmc_loop:
+                        self.dmc_current_addr = self.dmc_sample_addr
+                        self.dmc_bytes_remaining = self.dmc_sample_len
+                    elif self.dmc_irq_enabled:
+                        self.dmc_irq_active = True
 
     def _clock_quarter_frame(self):
         # Pulse 1
@@ -323,7 +386,9 @@ class APU:
             if self.pulse2_lc_value > 0: data |= 0x02
             if self.tri_lc_value > 0: data |= 0x04
             if self.noise_lc_value > 0: data |= 0x08
+            if self.dmc_bytes_remaining > 0: data |= 0x10
             if self.frame_irq_active: data |= 0x40
+            if self.dmc_irq_active: data |= 0x80
             self.frame_irq_active = False
             return data
         return 0
@@ -394,6 +459,20 @@ class APU:
                 self.noise_lc_value = self.LENGTH_TABLE[(data >> 3) & 0x1F]
             self.noise_env_start = True
 
+        # DMC
+        elif addr == 0x4010:
+            self.dmc_irq_enabled = (data & 0x80) != 0
+            self.dmc_loop = (data & 0x40) != 0
+            self.dmc_rate_index = data & 0x0F
+            self.dmc_timer_reload = self.DMC_TABLE[self.dmc_rate_index]
+            if not self.dmc_irq_enabled: self.dmc_irq_active = False
+        elif addr == 0x4011:
+            self.dmc_direct_load = data & 0x7F
+        elif addr == 0x4012:
+            self.dmc_sample_addr = 0xC000 | (data << 6)
+        elif addr == 0x4013:
+            self.dmc_sample_len = (data << 4) | 1
+
         elif addr == 0x4015:
             self.pulse1_enabled = (data & 0x01) != 0
             if not self.pulse1_enabled: self.pulse1_lc_value = 0
@@ -403,7 +482,18 @@ class APU:
             if not self.triangle_enabled: self.tri_lc_value = 0
             self.noise_enabled = (data & 0x08) != 0
             if not self.noise_enabled: self.noise_lc_value = 0
+            
             self.dmc_enabled = (data & 0x10) != 0
+            if not self.dmc_enabled:
+                self.dmc_bytes_remaining = 0
+            else:
+                if self.dmc_bytes_remaining == 0:
+                    self.dmc_current_addr = self.dmc_sample_addr
+                    self.dmc_bytes_remaining = self.dmc_sample_len
+                    if not self.dmc_buffer_full:
+                        self._dmc_fetch_sample()
+            self.dmc_irq_active = False
+
         elif addr == 0x4017:
             self.frame_counter_mode = (data >> 7) & 0x01
             self.frame_irq_inhibit = (data & 0x40) != 0

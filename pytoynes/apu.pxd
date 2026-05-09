@@ -1,4 +1,8 @@
+from .bus cimport Bus
+
 cdef class APU:
+    cdef public Bus bus
+
     cdef public bint pulse1_enabled
     cdef public bint pulse2_enabled
     cdef public bint triangle_enabled
@@ -80,6 +84,24 @@ cdef class APU:
     cdef public int frame_counter_cycles
     cdef public bint frame_irq_active
     cdef public bint frame_irq_inhibit
+
+    # DMC State
+    cdef public bint dmc_irq_enabled
+    cdef public bint dmc_loop
+    cdef public int dmc_rate_index
+    cdef public int dmc_direct_load
+    cdef public int dmc_sample_addr
+    cdef public int dmc_sample_len
+    cdef public int dmc_current_addr
+    cdef public int dmc_bytes_remaining
+    cdef public int dmc_sample_buffer
+    cdef public bint dmc_buffer_full
+    cdef public int dmc_shift_reg
+    cdef public int dmc_bits_remaining
+    cdef public int dmc_timer_value
+    cdef public int dmc_timer_reload
+    cdef public bint dmc_irq_active
+    cdef public bint dmc_silence_flag
     
     cdef public int clock_divider
     cdef public long long total_cycles
@@ -95,6 +117,7 @@ cdef class APU:
 
     cpdef void clock(self)
     cpdef void clock_n(self, int n)
+    cpdef void connect_bus(self, Bus bus)
     cpdef int cpu_read(self, int addr)
     cpdef void cpu_write(self, int addr, int data)
     cpdef int get_pulse1_sample(self)

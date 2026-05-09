@@ -11,6 +11,7 @@ cdef class Bus:
         self._cartridge = None
         self.ppu = PPU()
         self.apu = APU()
+        self.apu.connect_bus(self)
         self.controllers = [Controller(), Controller()]
 
     @property
