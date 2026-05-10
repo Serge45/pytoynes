@@ -33,6 +33,7 @@ class TestAPU(unittest.TestCase):
 
     def test_length_counter_decrement(self):
         apu = APU()
+        apu.cpu_write(0x4017, 0x40) # Inhibit IRQs
         apu.cpu_write(0x4015, 0x01)
         # Length index 3 is 2
         apu.cpu_write(0x4003, (0x03 << 3))

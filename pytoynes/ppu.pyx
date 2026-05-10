@@ -124,7 +124,7 @@ cdef class PPU:
         while self.total_cycles < target_total_cycles:
             self.clock()
 
-    cdef void _render_pixel(self):
+    cpdef void _render_pixel(self):
         cdef int ppu_mask = self.ppu_mask
         cdef int cycle = self.cycle
         cdef int bg_pixel = 0, bg_palette = 0
@@ -184,7 +184,7 @@ cdef class PPU:
         if 0 <= self.scanline < 240 and 1 <= cycle <= 256:
             self.pixels_view[self.scanline, cycle - 1] = color_idx
 
-    cdef void _update_shifters(self):
+    cpdef void _update_shifters(self):
         cdef int ppu_mask = self.ppu_mask
         cdef int i
         if ppu_mask & 0x08:
@@ -376,7 +376,7 @@ cdef class PPU:
 
     cpdef void connect_cartridge(self, Cartridge cartridge):
         self.cartridge = cartridge
-        if cartridge is not None:
+        if cartridge is not None and cartridge.rom is not None:
             self.mirror_mode = cartridge.rom.mirroring
 
     cdef inline int _map_nt_addr(self, int addr):

@@ -36,8 +36,8 @@ cdef class PPU:
     cpdef void clock(self)
     cpdef void connect_cartridge(self, Cartridge cartridge)
 
-    cdef void _render_pixel(self)
-    cdef void _update_shifters(self)
+    cpdef void _render_pixel(self)
+    cpdef void _update_shifters(self)
     cdef void _load_shifters(self)
     cdef void _increment_scroll_x(self)
     cdef void _increment_scroll_y(self)
