@@ -253,24 +253,21 @@ class APU:
             self.pulse1_samples[self.sample_ptr] = raw_sample1
             self.sample_ptr = (self.sample_ptr + 1) & 0xFF
 
-            # Mixing and output to audio buffer
+            # Mixing using PRECISE formulas
             if self.audio_ptr < 2048:
-                # 1. Pulse Mixing
                 p_vol1 = self.pulse1_env_decay if not self.pulse1_env_const else self.pulse1_env_vol_period
                 p_vol2 = self.pulse2_env_decay if not self.pulse2_env_const else self.pulse2_env_vol_period
-                p1 = raw_sample1 * p_vol1
-                p2 = raw_sample2 * p_vol2
+                n_vol = self.noise_env_decay if not self.noise_env_const else self.noise_env_vol_period
+                
+                # 1. Pulse Mixing
+                pulse_sum = raw_sample1 * p_vol1 + raw_sample2 * p_vol2
                 pulse_out = 0.0
-                if (p1 + p2) > 0:
-                    pulse_out = 95.88 / ((8128.0 / (p1 + p2)) + 100.0)
+                if pulse_sum > 0:
+                    pulse_out = 95.88 / ((8128.0 / pulse_sum) + 100.0)
                 
                 # 2. TND Mixing
-                n_vol = self.noise_env_decay if not self.noise_env_const else self.noise_env_vol_period
-                s_tri = float(raw_sample_tri)
-                s_noise = float(raw_sample_noise * n_vol)
-                s_dmc = float(self.dmc_direct_load)
+                tnd_denom = (raw_sample_tri / 8227.0) + ((raw_sample_noise * n_vol) / 12241.0) + (self.dmc_direct_load / 22638.0)
                 tnd_out = 0.0
-                tnd_denom = (s_tri / 8227.0) + (s_noise / 12241.0) + (s_dmc / 22638.0)
                 if tnd_denom > 0:
                     tnd_out = 159.79 / ((1.0 / tnd_denom) + 100.0)
                 
@@ -346,15 +343,13 @@ class APU:
     def _calculate_p1_target_period(self):
         period = self.pulse1_timer_reload
         delta = period >> self.p1_sweep_shift
-        if self.p1_sweep_negate:
-            return period - delta - 1
+        if self.p1_sweep_negate: return period - delta - 1
         return period + delta
 
     def _calculate_p2_target_period(self):
         period = self.pulse2_timer_reload
         delta = period >> self.p2_sweep_shift
-        if self.p2_sweep_negate:
-            return period - delta
+        if self.p2_sweep_negate: return period - delta
         return period + delta
 
     def _clock_p1_sweep(self):
@@ -390,6 +385,7 @@ class APU:
             if self.frame_irq_active: data |= 0x40
             if self.dmc_irq_active: data |= 0x80
             self.frame_irq_active = False
+            self.dmc_irq_active = False
             return data
         return 0
 
@@ -455,8 +451,7 @@ class APU:
             self.noise_mode = (data & 0x80) != 0
             self.noise_timer_reload = self.NOISE_TABLE[data & 0x0F]
         elif addr == 0x400F:
-            if self.noise_enabled:
-                self.noise_lc_value = self.LENGTH_TABLE[(data >> 3) & 0x1F]
+            if self.noise_enabled: self.noise_lc_value = self.LENGTH_TABLE[(data >> 3) & 0x1F]
             self.noise_env_start = True
 
         # DMC
@@ -466,12 +461,9 @@ class APU:
             self.dmc_rate_index = data & 0x0F
             self.dmc_timer_reload = self.DMC_TABLE[self.dmc_rate_index]
             if not self.dmc_irq_enabled: self.dmc_irq_active = False
-        elif addr == 0x4011:
-            self.dmc_direct_load = data & 0x7F
-        elif addr == 0x4012:
-            self.dmc_sample_addr = 0xC000 | (data << 6)
-        elif addr == 0x4013:
-            self.dmc_sample_len = (data << 4) | 1
+        elif addr == 0x4011: self.dmc_direct_load = data & 0x7F
+        elif addr == 0x4012: self.dmc_sample_addr = 0xC000 | (data << 6)
+        elif addr == 0x4013: self.dmc_sample_len = (data << 4) | 1
 
         elif addr == 0x4015:
             self.pulse1_enabled = (data & 0x01) != 0
@@ -482,16 +474,13 @@ class APU:
             if not self.triangle_enabled: self.tri_lc_value = 0
             self.noise_enabled = (data & 0x08) != 0
             if not self.noise_enabled: self.noise_lc_value = 0
-            
             self.dmc_enabled = (data & 0x10) != 0
-            if not self.dmc_enabled:
-                self.dmc_bytes_remaining = 0
+            if not self.dmc_enabled: self.dmc_bytes_remaining = 0
             else:
                 if self.dmc_bytes_remaining == 0:
                     self.dmc_current_addr = self.dmc_sample_addr
                     self.dmc_bytes_remaining = self.dmc_sample_len
-                    if not self.dmc_buffer_full:
-                        self._dmc_fetch_sample()
+                    if not self.dmc_buffer_full: self._dmc_fetch_sample()
             self.dmc_irq_active = False
 
         elif addr == 0x4017:
@@ -502,8 +491,7 @@ class APU:
             if self.frame_counter_mode == 1: self._clock_half_frame()
 
     def clock_n(self, n):
-        for _ in range(n):
-            self.clock()
+        for _ in range(n): self.clock()
 
     def flush_audio(self, out):
         count = min(self.audio_ptr, len(out))
@@ -513,8 +501,6 @@ class APU:
 
     def get_pulse1_sample(self):
         tp1 = self._calculate_p1_target_period()
-        if not self.pulse1_enabled or self.pulse1_lc_value == 0:
-            return 0
-        if self.pulse1_timer_reload < 8 or tp1 > 0x7FF:
-            return 0
+        if not self.pulse1_enabled or self.pulse1_lc_value == 0: return 0
+        if self.pulse1_timer_reload < 8 or tp1 > 0x7FF: return 0
         return self.DUTY_TABLE[self.pulse1_duty_mode][self.pulse1_duty_step]

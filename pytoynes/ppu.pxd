@@ -1,6 +1,7 @@
 # cython: language_level=3
 cimport numpy as np
 from .cartridge cimport Cartridge
+from .bus cimport Bus
 
 cdef class PPU:
     cdef public int ppu_ctrl, ppu_mask, ppu_status, oam_addr, oam_data
@@ -13,6 +14,7 @@ cdef class PPU:
 
     cdef public unsigned char[:] vram, palette_vram, oam_vram
     cdef public object pixels  # numpy array
+    cdef unsigned char[:, :] pixels_view
 
     cdef public int bg_next_tile_id, bg_next_tile_attrib
     cdef public int bg_next_tile_lsb, bg_next_tile_msb
@@ -24,9 +26,6 @@ cdef class PPU:
     cdef public unsigned char[:] sprite_shifter_pattern_lo, sprite_shifter_pattern_hi
     cdef public unsigned char[:] sprite_attribs, sprite_x_counters
 
-    cdef public object _bg_pixels, _bg_palettes
-    cdef public object _fg_pixels, _fg_palettes, _fg_priorities, _sprite0_possible
-
     cdef public Cartridge cartridge
 
     cpdef int cpu_read(self, int addr)
@@ -37,9 +36,8 @@ cdef class PPU:
     cpdef void clock(self)
     cpdef void connect_cartridge(self, Cartridge cartridge)
 
-    cdef void _render_scanline_fast(self)
-    cpdef void _render_pixel(self)
-    cpdef void _update_shifters(self)
+    cdef void _render_pixel(self)
+    cdef void _update_shifters(self)
     cdef void _load_shifters(self)
     cdef void _increment_scroll_x(self)
     cdef void _increment_scroll_y(self)

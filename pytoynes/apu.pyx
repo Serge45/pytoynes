@@ -152,6 +152,8 @@ cdef class APU:
         cdef int raw_sample2 = 0
         cdef int raw_sample_tri = 0
         cdef int raw_sample_noise = 0
+        cdef int p_vol1, p_vol2, n_vol
+        cdef float pulse_out, tnd_out, tnd_denom
         self.total_cycles += 1
         
         # 1. Timer Clock (Pulse and Noise clock every 2 CPU cycles)
@@ -257,32 +259,24 @@ cdef class APU:
             self.pulse1_samples[self.sample_ptr] = raw_sample1
             self.sample_ptr = (self.sample_ptr + 1) & 0xFF
 
-            # Mixing and output to audio buffer
+            # Mixing using PRECISE formulas
             if self.audio_ptr < 2048:
-                # 1. Pulse Mixing
                 p_vol1 = self.pulse1_env_decay if not self.pulse1_env_const else self.pulse1_env_vol_period
                 p_vol2 = self.pulse2_env_decay if not self.pulse2_env_const else self.pulse2_env_vol_period
-                
-                p1 = raw_sample1 * p_vol1
-                p2 = raw_sample2 * p_vol2
-                
-                pulse_out = 0.0
-                if (p1 + p2) > 0:
-                    pulse_out = 95.88 / ((8128.0 / (p1 + p2)) + 100.0)
-                
-                # 2. TND Mixing (Triangle, Noise, DMC)
                 n_vol = self.noise_env_decay if not self.noise_env_const else self.noise_env_vol_period
                 
-                s_tri = <float>raw_sample_tri
-                s_noise = <float>raw_sample_noise * n_vol
-                s_dmc = <float>self.dmc_direct_load
+                # 1. Pulse Mixing
+                pulse_sum = raw_sample1 * p_vol1 + raw_sample2 * p_vol2
+                pulse_out = 0.0
+                if pulse_sum > 0:
+                    pulse_out = 95.88 / ((8128.0 / pulse_sum) + 100.0)
                 
+                # 2. TND Mixing
+                tnd_denom = (raw_sample_tri / 8227.0) + ((raw_sample_noise * n_vol) / 12241.0) + (self.dmc_direct_load / 22638.0)
                 tnd_out = 0.0
-                tnd_denom = (s_tri / 8227.0) + (s_noise / 12241.0) + (s_dmc / 22638.0)
                 if tnd_denom > 0:
                     tnd_out = 159.79 / ((1.0 / tnd_denom) + 100.0)
                 
-                # Combine. Offset varies based on implemented channels to keep signal centered.
                 self.audio_buffer[self.audio_ptr] = (pulse_out + tnd_out) - 0.1
                 self.audio_ptr += 1
 
@@ -367,16 +361,13 @@ cdef class APU:
         self._clock_p1_sweep()
         self._clock_p2_sweep()
 
-        # Pulse 1 Length Counter
+        # Length Counters
         if self.pulse1_lc_value > 0 and not self.pulse1_lc_halt:
             self.pulse1_lc_value -= 1
-        # Pulse 2 Length Counter
         if self.pulse2_lc_value > 0 and not self.pulse2_lc_halt:
             self.pulse2_lc_value -= 1
-        # Triangle Length Counter
         if self.tri_lc_value > 0 and not self.tri_lc_halt:
             self.tri_lc_value -= 1
-        # Noise Length Counter
         if self.noise_lc_value > 0 and not self.noise_lc_halt:
             self.noise_lc_value -= 1
 
@@ -384,26 +375,21 @@ cdef class APU:
         cdef int period = self.pulse1_timer_reload
         cdef int delta = period >> self.p1_sweep_shift
         if self.p1_sweep_negate:
-            # Pulse 1 uses one's complement for negation
             return period - delta - 1
-        else:
-            return period + delta
+        return period + delta
 
     cdef int _calculate_p2_target_period(self):
         cdef int period = self.pulse2_timer_reload
         cdef int delta = period >> self.p2_sweep_shift
         if self.p2_sweep_negate:
-            # Pulse 2 uses two's complement for negation
             return period - delta
-        else:
-            return period + delta
+        return period + delta
 
     cdef void _clock_p1_sweep(self):
         if self.p1_sweep_divider == 0 and self.p1_sweep_enabled and self.p1_sweep_shift > 0:
             target = self._calculate_p1_target_period()
             if target <= 0x7FF and self.pulse1_timer_reload >= 8:
                 self.pulse1_timer_reload = target
-
         if self.p1_sweep_divider == 0 or self.p1_sweep_reload:
             self.p1_sweep_divider = self.p1_sweep_period
             self.p1_sweep_reload = False
@@ -415,7 +401,6 @@ cdef class APU:
             target = self._calculate_p2_target_period()
             if target <= 0x7FF and self.pulse2_timer_reload >= 8:
                 self.pulse2_timer_reload = target
-
         if self.p2_sweep_divider == 0 or self.p2_sweep_reload:
             self.p2_sweep_divider = self.p2_sweep_period
             self.p2_sweep_reload = False
@@ -432,7 +417,8 @@ cdef class APU:
             if self.dmc_bytes_remaining > 0: data |= 0x10
             if self.frame_irq_active: data |= 0x40
             if self.dmc_irq_active: data |= 0x80
-            self.frame_irq_active = False # Clear IRQ on read
+            self.frame_irq_active = False
+            self.dmc_irq_active = False
             return data
         return 0
 
@@ -440,8 +426,7 @@ cdef class APU:
         # Pulse 1
         if addr == 0x4000:
             self.pulse1_duty_mode = (data >> 6) & 0x03
-            self.pulse1_lc_halt = (data & 0x20) != 0
-            self.pulse1_env_loop = (data & 0x20) != 0
+            self.pulse1_lc_halt = self.pulse1_env_loop = (data & 0x20) != 0
             self.pulse1_env_const = (data & 0x10) != 0
             self.pulse1_env_vol_period = data & 0x0F
         elif addr == 0x4001:
@@ -450,21 +435,18 @@ cdef class APU:
             self.p1_sweep_negate = (data & 0x08) != 0
             self.p1_sweep_shift = data & 0x07
             self.p1_sweep_reload = True
-        elif addr == 0x4002:
-            self.pulse1_timer_reload = (self.pulse1_timer_reload & 0x0700) | data
+        elif addr == 0x4002: self.pulse1_timer_reload = (self.pulse1_timer_reload & 0x0700) | data
         elif addr == 0x4003:
             self.pulse1_timer_reload = (self.pulse1_timer_reload & 0x00FF) | ((data & 0x07) << 8)
             self.pulse1_timer_value = self.pulse1_timer_reload
             self.pulse1_duty_step = 0
-            if self.pulse1_enabled:
-                self.pulse1_lc_value = LENGTH_TABLE[(data >> 3) & 0x1F]
+            if self.pulse1_enabled: self.pulse1_lc_value = LENGTH_TABLE[(data >> 3) & 0x1F]
             self.pulse1_env_start = True
         
         # Pulse 2
         elif addr == 0x4004:
             self.pulse2_duty_mode = (data >> 6) & 0x03
-            self.pulse2_lc_halt = (data & 0x20) != 0
-            self.pulse2_env_loop = (data & 0x20) != 0
+            self.pulse2_lc_halt = self.pulse2_env_loop = (data & 0x20) != 0
             self.pulse2_env_const = (data & 0x10) != 0
             self.pulse2_env_vol_period = data & 0x0F
         elif addr == 0x4005:
@@ -473,27 +455,23 @@ cdef class APU:
             self.p2_sweep_negate = (data & 0x08) != 0
             self.p2_sweep_shift = data & 0x07
             self.p2_sweep_reload = True
-        elif addr == 0x4006:
-            self.pulse2_timer_reload = (self.pulse2_timer_reload & 0x0700) | data
+        elif addr == 0x4006: self.pulse2_timer_reload = (self.pulse2_timer_reload & 0x0700) | data
         elif addr == 0x4007:
             self.pulse2_timer_reload = (self.pulse2_timer_reload & 0x00FF) | ((data & 0x07) << 8)
             self.pulse2_timer_value = self.pulse2_timer_reload
             self.pulse2_duty_step = 0
-            if self.pulse2_enabled:
-                self.pulse2_lc_value = LENGTH_TABLE[(data >> 3) & 0x1F]
+            if self.pulse2_enabled: self.pulse2_lc_value = LENGTH_TABLE[(data >> 3) & 0x1F]
             self.pulse2_env_start = True
 
         # Triangle
         elif addr == 0x4008:
             self.tri_lc_halt = (data & 0x80) != 0
             self.tri_linear_reload = data & 0x7F
-        elif addr == 0x400A:
-            self.tri_timer_reload = (self.tri_timer_reload & 0x0700) | data
+        elif addr == 0x400A: self.tri_timer_reload = (self.tri_timer_reload & 0x0700) | data
         elif addr == 0x400B:
             self.tri_timer_reload = (self.tri_timer_reload & 0x00FF) | ((data & 0x07) << 8)
             self.tri_timer_value = self.tri_timer_reload
-            if self.triangle_enabled:
-                self.tri_lc_value = LENGTH_TABLE[(data >> 3) & 0x1F]
+            if self.triangle_enabled: self.tri_lc_value = LENGTH_TABLE[(data >> 3) & 0x1F]
             self.tri_linear_reload_flag = True
 
         # Noise
@@ -506,8 +484,7 @@ cdef class APU:
             self.noise_mode = (data & 0x80) != 0
             self.noise_timer_reload = NOISE_TABLE[data & 0x0F]
         elif addr == 0x400F:
-            if self.noise_enabled:
-                self.noise_lc_value = LENGTH_TABLE[(data >> 3) & 0x1F]
+            if self.noise_enabled: self.noise_lc_value = LENGTH_TABLE[(data >> 3) & 0x1F]
             self.noise_env_start = True
 
         # DMC
@@ -517,12 +494,9 @@ cdef class APU:
             self.dmc_rate_index = data & 0x0F
             self.dmc_timer_reload = DMC_TABLE[self.dmc_rate_index]
             if not self.dmc_irq_enabled: self.dmc_irq_active = False
-        elif addr == 0x4011:
-            self.dmc_direct_load = data & 0x7F
-        elif addr == 0x4012:
-            self.dmc_sample_addr = 0xC000 | (data << 6)
-        elif addr == 0x4013:
-            self.dmc_sample_len = (data << 4) | 1
+        elif addr == 0x4011: self.dmc_direct_load = data & 0x7F
+        elif addr == 0x4012: self.dmc_sample_addr = 0xC000 | (data << 6)
+        elif addr == 0x4013: self.dmc_sample_len = (data << 4) | 1
 
         elif addr == 0x4015:
             self.pulse1_enabled = (data & 0x01) != 0
@@ -533,16 +507,13 @@ cdef class APU:
             if not self.triangle_enabled: self.tri_lc_value = 0
             self.noise_enabled = (data & 0x08) != 0
             if not self.noise_enabled: self.noise_lc_value = 0
-            
             self.dmc_enabled = (data & 0x10) != 0
-            if not self.dmc_enabled:
-                self.dmc_bytes_remaining = 0
+            if not self.dmc_enabled: self.dmc_bytes_remaining = 0
             else:
                 if self.dmc_bytes_remaining == 0:
                     self.dmc_current_addr = self.dmc_sample_addr
                     self.dmc_bytes_remaining = self.dmc_sample_len
-                    if not self.dmc_buffer_full:
-                        self._dmc_fetch_sample()
+                    if not self.dmc_buffer_full: self._dmc_fetch_sample()
             self.dmc_irq_active = False
 
         elif addr == 0x4017:
@@ -550,16 +521,12 @@ cdef class APU:
             self.frame_irq_inhibit = (data & 0x40) != 0
             if self.frame_irq_inhibit: self.frame_irq_active = False
             self.frame_counter_cycles = 0
-            if self.frame_counter_mode == 1:
-                self._clock_half_frame()
-
+            if self.frame_counter_mode == 1: self._clock_half_frame()
 
     cpdef int get_pulse1_sample(self):
         cdef int tp = self._calculate_p1_target_period()
-        if not self.pulse1_enabled or self.pulse1_lc_value == 0:
-            return 0
-        if self.pulse1_timer_reload < 8 or tp > 0x7FF:
-            return 0
+        if not self.pulse1_enabled or self.pulse1_lc_value == 0: return 0
+        if self.pulse1_timer_reload < 8 or tp > 0x7FF: return 0
         return DUTY_TABLE[self.pulse1_duty_mode][self.pulse1_duty_step]
 
     cpdef int flush_audio(self, float[:] out):

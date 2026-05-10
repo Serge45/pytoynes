@@ -2,6 +2,7 @@
 from .ppu cimport PPU
 from .cartridge cimport Cartridge
 from .apu cimport APU
+from .mos6502 cimport MOS6502
 
 cdef class Bus:
     cdef public unsigned char[:] ram
@@ -12,3 +13,4 @@ cdef class Bus:
 
     cpdef int read(self, int addr)
     cpdef void write(self, int addr, int data)
+    cpdef void run_frame(self, MOS6502 cpu)

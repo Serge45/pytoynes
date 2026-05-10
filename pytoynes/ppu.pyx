@@ -3,7 +3,14 @@ import array
 cimport numpy as np
 import numpy as np
 from .cartridge cimport Cartridge
-from .rom import MirrorMode
+
+# Precomputed bit reversal table for sprite flipping
+cdef unsigned char BIT_REVERSE[256]
+def _init_bit_reverse():
+    for i in range(256):
+        b = '{:08b}'.format(i)
+        BIT_REVERSE[i] = int(b[::-1], 2)
+_init_bit_reverse()
 
 cdef class PPU:
     def __init__(self):
@@ -14,14 +21,9 @@ cdef class PPU:
         self.palette_vram = array.array('B', bytearray(32))
         self.oam_vram = array.array('B', bytearray(256))
 
+        # Pixel buffer for the full frame
         self.pixels = np.zeros((240, 256), dtype=np.uint8)
-
-        self._bg_pixels = np.zeros(256, dtype=np.uint8)
-        self._bg_palettes = np.zeros(256, dtype=np.uint8)
-        self._fg_pixels = np.zeros(256, dtype=np.uint8)
-        self._fg_palettes = np.zeros(256, dtype=np.uint8)
-        self._fg_priorities = np.zeros(256, dtype=np.uint8)
-        self._sprite0_possible = np.zeros(256, dtype=np.uint8)
+        self.pixels_view = self.pixels
 
         self.ppu_ctrl = 0
         self.ppu_mask = 0
@@ -63,14 +65,11 @@ cdef class PPU:
         cdef int phase
 
         if -1 <= scanline <= 239:
+            # Sprite evaluation and fetches
             if cycle == 257:
-                if scanline >= -1: self._evaluate_sprites()
-            elif cycle == 260:
-                # MMC3 IRQ counter
-                if self.cartridge is not None and (self.ppu_mask & 0x18):
-                    self.cartridge.mapper.count_scanline()
+                self._evaluate_sprites()
             elif cycle == 340:
-                if scanline >= -1: self._fetch_sprite_data()
+                self._fetch_sprite_data()
 
             if 1 <= cycle <= 256:
                 if scanline >= 0: self._render_pixel()
@@ -107,17 +106,17 @@ cdef class PPU:
         if self.cycle >= 341:
             self.cycle = 0
             self.scanline += 1
-            scanline = self.scanline
-            if scanline == 241:
+            if self.scanline == 241:
                 self.ppu_status |= 0x80
                 if self.ppu_ctrl & 0x80: self.nmi = True
-            elif scanline >= 261:
+            elif self.scanline >= 261:
                 self.scanline = -1
                 self.frame_count += 1
                 self.ppu_status &= ~0xC0
                 self.nmi = False
                 self.is_odd_frame = not self.is_odd_frame
-                if self.scanline == -1 and (self.ppu_mask & 0x18) and self.is_odd_frame:
+                # Skip cycle on odd frames
+                if (self.ppu_mask & 0x18) and self.is_odd_frame:
                     self.cycle = 1
                     self.total_cycles += 1
 
@@ -125,11 +124,7 @@ cdef class PPU:
         while self.total_cycles < target_total_cycles:
             self.clock()
 
-    cdef void _render_scanline_fast(self):
-        # Disabled for accuracy
-        pass
-
-    cpdef void _render_pixel(self):
+    cdef void _render_pixel(self):
         cdef int ppu_mask = self.ppu_mask
         cdef int cycle = self.cycle
         cdef int bg_pixel = 0, bg_palette = 0
@@ -138,6 +133,7 @@ cdef class PPU:
         cdef int bit_mux, p0_pixel, p1_pixel, bg_pal0, bg_pal1
         cdef int pixel_lo, pixel_hi, i, palette, pixel, pal_addr, color_idx
 
+        # Background
         if ppu_mask & 0x08:
             if cycle > 8 or (ppu_mask & 0x02):
                 bit_mux = 0x8000 >> self.fine_x
@@ -148,6 +144,7 @@ cdef class PPU:
                 bg_pal1 = 1 if (self.bg_shifter_attrib_hi & bit_mux) else 0
                 bg_palette = (bg_pal1 << 1) | bg_pal0
 
+        # Sprites
         if ppu_mask & 0x10:
             if cycle > 8 or (ppu_mask & 0x04):
                 for i in range(self.sprite_count):
@@ -162,6 +159,7 @@ cdef class PPU:
                                 sprite_zero_hit = True
                             break
 
+        # Mixing
         palette = 0
         pixel = 0
         if bg_pixel == 0:
@@ -181,9 +179,12 @@ cdef class PPU:
             if (pal_addr & 0x13) == 0x10: pal_addr &= ~0x10
             color_idx = self.palette_vram[pal_addr & 0x1F]
         if ppu_mask & 0x01: color_idx &= 0x30
-        self.pixels[self.scanline, self.cycle - 1] = color_idx
+        
+        # Write to pixel buffer via memoryview
+        if 0 <= self.scanline < 240 and 1 <= cycle <= 256:
+            self.pixels_view[self.scanline, cycle - 1] = color_idx
 
-    cpdef void _update_shifters(self):
+    cdef void _update_shifters(self):
         cdef int ppu_mask = self.ppu_mask
         cdef int i
         if ppu_mask & 0x08:
@@ -248,95 +249,113 @@ cdef class PPU:
         self.bg_next_tile_msb = self.ppu_read(table * 0x1000 + self.bg_next_tile_id * 16 + fine_y + 8)
 
     cdef void _evaluate_sprites(self):
-        cdef int sprite_size, i, y, diff, j
+        cdef int h = 16 if (self.ppu_ctrl & 0x20) else 8
+        cdef int y, i, n, diff
         self.sprite_count = 0
         self.sprite_zero_hit_possible = False
-        sprite_size = 16 if (self.ppu_ctrl & 0x20) else 8
+        
         for i in range(64):
-            y = self.oam_vram[i * 4]
-            # Corrected for cycle-accurate path: Evaluate for NEXT scanline
+            y = self.oam_vram[i*4]
             diff = self.scanline - y
-            if 0 <= diff < sprite_size:
+            if 0 <= diff < h:
                 if self.sprite_count < 8:
                     if i == 0: self.sprite_zero_hit_possible = True
-                    for j in range(4):
-                        self.secondary_oam[self.sprite_count * 4 + j] = self.oam_vram[i * 4 + j]
+                    for n in range(4): self.secondary_oam[self.sprite_count*4 + n] = self.oam_vram[i*4 + n]
                     self.sprite_count += 1
                 else:
-                    self.ppu_status |= 0x20
+                    self.ppu_status |= 0x20 # Sprite overflow
                     break
 
     cdef void _fetch_sprite_data(self):
-        cdef int sprite_size, table, i, y, tile_id, attr, x, row, addr
-        cdef int table_16, tile_idx, lsb_val, msb_val
-        sprite_size = 16 if (self.ppu_ctrl & 0x20) else 8
-        table = (self.ppu_ctrl >> 3) & 0x01
-        for i in range(self.sprite_count):
-            y = self.secondary_oam[i * 4]
-            tile_id = self.secondary_oam[i * 4 + 1]
-            attr = self.secondary_oam[i * 4 + 2]
-            x = self.secondary_oam[i * 4 + 3]
-            # Corrected for cycle-accurate path: Fetch for NEXT scanline
-            row = self.scanline - y
-            if attr & 0x80: row = (sprite_size - 1) - row
-            if sprite_size == 8:
-                addr = table * 0x1000 + tile_id * 16 + row
+        cdef int h = 16 if (self.ppu_ctrl & 0x20) else 8
+        cdef int i, tile_id, y, attrib, x, addr, diff
+        
+        for i in range(8):
+            if i < self.sprite_count:
+                y = self.secondary_oam[i*4]
+                tile_id = self.secondary_oam[i*4 + 1]
+                attrib = self.secondary_oam[i*4 + 2]
+                x = self.secondary_oam[i*4 + 3]
+                diff = self.scanline - y
+                
+                if h == 8:
+                    if not (attrib & 0x80): addr = ((self.ppu_ctrl & 0x08) << 9) | (tile_id << 4) | diff
+                    else: addr = ((self.ppu_ctrl & 0x08) << 9) | (tile_id << 4) | (7 - diff)
+                else:
+                    if not (attrib & 0x80):
+                        if diff < 8: addr = ((tile_id & 0x01) << 12) | ((tile_id & 0xFE) << 4) | diff
+                        else: addr = ((tile_id & 0x01) << 12) | (((tile_id & 0xFE) + 1) << 4) | (diff - 8)
+                    else:
+                        if diff < 8: addr = ((tile_id & 0x01) << 12) | (((tile_id & 0xFE) + 1) << 4) | (7 - diff)
+                        else: addr = ((tile_id & 0x01) << 12) | ((tile_id & 0xFE) << 4) | (15 - diff)
+                
+                self.sprite_shifter_pattern_lo[i] = self.ppu_read(addr)
+                self.sprite_shifter_pattern_hi[i] = self.ppu_read(addr + 8)
+                if attrib & 0x40:
+                    self.sprite_shifter_pattern_lo[i] = BIT_REVERSE[self.sprite_shifter_pattern_lo[i]]
+                    self.sprite_shifter_pattern_hi[i] = BIT_REVERSE[self.sprite_shifter_pattern_hi[i]]
+                
+                self.sprite_attribs[i] = attrib
+                self.sprite_x_counters[i] = x
             else:
-                table_16 = tile_id & 0x01
-                tile_idx = tile_id & 0xFE
-                if row >= 8: tile_idx += 1; row -= 8
-                addr = table_16 * 0x1000 + tile_idx * 16 + row
-            lsb_val = self.ppu_read(addr)
-            msb_val = self.ppu_read(addr + 8)
-            if attr & 0x40:
-                lsb_val = int('{:08b}'.format(lsb_val)[::-1], 2)
-                msb_val = int('{:08b}'.format(msb_val)[::-1], 2)
-            self.sprite_shifter_pattern_lo[i] = lsb_val
-            self.sprite_shifter_pattern_hi[i] = msb_val
-            self.sprite_attribs[i] = attr
-            self.sprite_x_counters[i] = x
+                self.sprite_shifter_pattern_lo[i] = 0
+                self.sprite_shifter_pattern_hi[i] = 0
+                self.sprite_attribs[i] = 0
+                self.sprite_x_counters[i] = 0
 
     cpdef int cpu_read(self, int addr):
-        cdef int reg = addr & 0x0007
         cdef int data = 0
-        if reg == 0x02:
-            data = self.ppu_status & 0xE0; self.ppu_status &= ~0x80; self.w = 0
-        elif reg == 0x04: data = self.oam_vram[self.oam_addr]
-        elif reg == 0x07:
-            data = self.ppu_data_buffer; self.ppu_data_buffer = self.ppu_read(self.v)
-            if self.v >= 0x3F00: data = self.ppu_data_buffer
-            self.v = (self.v + (32 if (self.ppu_ctrl & 0x04) else 1)) & 0x7FFF
-        return data
+        if addr == 0x2002:
+            data = (self.ppu_status & 0xE0) | (self.ppu_data_buffer & 0x1F)
+            self.ppu_status &= ~0x80
+            self.w = 0
+            return data
+        elif addr == 0x2004: return self.oam_vram[self.oam_addr]
+        elif addr == 0x2007:
+            data = self.ppu_data_buffer
+            self.ppu_data_buffer = self.ppu_read(self.v & 0x3FFF)
+            if (self.v & 0x3FFF) >= 0x3F00: data = self.ppu_data_buffer
+            self.v += (32 if (self.ppu_ctrl & 0x04) else 1)
+            return data
+        return 0
 
     cpdef void cpu_write(self, int addr, int data):
-        cdef int reg = addr & 0x0007
-        if reg == 0x00: self.ppu_ctrl = data; self.t = (self.t & 0x73FF) | ((data & 0x03) << 10)
-        elif reg == 0x01: self.ppu_mask = data
-        elif reg == 0x03: self.oam_addr = data
-        elif reg == 0x04: self.oam_vram[self.oam_addr] = data; self.oam_addr = (self.oam_addr + 1) & 0xFF
-        elif reg == 0x05:
-            if self.w == 0: self.t = (self.t & 0x7FE0) | ((data & 0xF8) >> 3); self.fine_x = data & 0x07; self.w = 1
-            else: self.t = (self.t & 0x0C1F) | ((data & 0x07) << 12) | ((data & 0xF8) << 2); self.w = 0
-        elif reg == 0x06:
-            if self.w == 0: self.t = (self.t & 0x00FF) | ((data & 0x3F) << 8); self.w = 1
-            else: self.t = (self.t & 0xFF00) | (data & 0xFF); self.v = self.t; self.w = 0
-        elif reg == 0x07:
-            self.ppu_write(self.v, data)
-            self.v = (self.v + (32 if (self.ppu_ctrl & 0x04) else 1)) & 0x7FFF
-
-    def get_pattern_pixel(self, int table, int tile_idx, int x, int y):
-        cdef int base_addr = table * 0x1000 + tile_idx * 16
-        cdef int low_byte = self.ppu_read(base_addr + y)
-        cdef int high_byte = self.ppu_read(base_addr + y + 8)
-        cdef int bit_pos = 7 - x
-        return (((high_byte >> bit_pos) & 0x01) << 1) | ((low_byte >> bit_pos) & 0x01)
-
-    cpdef void connect_cartridge(self, Cartridge cartridge):
-        self.cartridge = cartridge
+        if addr == 0x2000:
+            self.ppu_ctrl = data
+            self.t = (self.t & ~0x0C00) | ((data & 0x03) << 10)
+        elif addr == 0x2001: self.ppu_mask = data
+        elif addr == 0x2003: self.oam_addr = data
+        elif addr == 0x2004:
+            self.oam_vram[self.oam_addr] = data
+            self.oam_addr = (self.oam_addr + 1) & 0xFF
+        elif addr == 0x2005:
+            if self.w == 0:
+                self.fine_x = data & 0x07
+                self.t = (self.t & ~0x001F) | (data >> 3)
+                self.w = 1
+            else:
+                self.t = (self.t & ~0x73E0) | ((data & 0x07) << 12) | ((data & 0xF8) << 2)
+                self.w = 0
+        elif addr == 0x2006:
+            if self.w == 0:
+                self.t = (self.t & ~0x7F00) | ((data & 0x3F) << 8)
+                self.w = 1
+            else:
+                self.t = (self.t & ~0x00FF) | data
+                self.v = self.t
+                self.w = 0
+        elif addr == 0x2007:
+            self.ppu_write(self.v & 0x3FFF, data)
+            self.v += (32 if (self.ppu_ctrl & 0x04) else 1)
 
     cpdef int ppu_read(self, int addr):
+        cdef int res
         addr &= 0x3FFF
-        if addr <= 0x1FFF: return self.cartridge.ppu_read(addr)
+        if self.cartridge is not None:
+            res = self.cartridge.ppu_read(addr)
+            if res != -1: return res # Fall through if -1
+        
+        if addr <= 0x1FFF: return 0
         elif addr <= 0x3EFF: return self.vram[self._map_nt_addr(addr)]
         else:
             addr &= 0x001F
@@ -345,12 +364,20 @@ cdef class PPU:
 
     cpdef void ppu_write(self, int addr, int data):
         addr &= 0x3FFF
-        if addr <= 0x1FFF: self.cartridge.ppu_write(addr, data)
+        if self.cartridge is not None:
+            if self.cartridge.ppu_write(addr, data) != -1: return # Fall through if -1
+
+        if addr <= 0x1FFF: return
         elif addr <= 0x3EFF: self.vram[self._map_nt_addr(addr)] = data & 0xFF
         else:
             addr &= 0x001F
             if (addr & 0x13) == 0x10: addr &= ~0x10
             self.palette_vram[addr] = data & 0x3F
+
+    cpdef void connect_cartridge(self, Cartridge cartridge):
+        self.cartridge = cartridge
+        if cartridge is not None:
+            self.mirror_mode = cartridge.rom.mirroring
 
     cdef inline int _map_nt_addr(self, int addr):
         cdef int mode = self.mirror_mode

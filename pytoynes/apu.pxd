@@ -118,6 +118,7 @@ cdef class APU:
     cpdef void clock(self)
     cpdef void clock_n(self, int n)
     cpdef void connect_bus(self, Bus bus)
+    cdef void _dmc_fetch_sample(self)
     cpdef int cpu_read(self, int addr)
     cpdef void cpu_write(self, int addr, int data)
     cpdef int get_pulse1_sample(self)

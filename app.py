@@ -37,7 +37,7 @@ def main():
     pygame.display.init()
     pygame.font.init()
     try:
-        pygame.mixer.init(frequency=44100, size=-16, channels=1, buffer=512)
+        pygame.mixer.init(frequency=44100, size=-16, channels=1, buffer=2048)
         audio_enabled = True
         _mixer_conf = pygame.mixer.get_init()
         audio_channels = _mixer_conf[2] if _mixer_conf else 1
@@ -67,7 +67,9 @@ def main():
     emu_fps = 0.0
     last_emu_fps_time = pygame.time.get_ticks()
     last_ppu_frame_count = 0
-    total_cpu_cycles = 7
+    
+    # Audio Accumulation Buffer
+    audio_accumulator = np.array([], dtype=np.float32)
 
     debug_window = None
     debug_renderer = None
@@ -114,83 +116,48 @@ def main():
                     running = False
                 elif e.key == pygame.K_TAB:
                     debug_mode = not debug_mode
-                    if debug_mode:
-                        open_debug_window()
-                    else:
-                        close_debug_window()
+                    if debug_mode: open_debug_window()
+                    else: close_debug_window()
                 if e.key in key_map:
                     bus.controllers[0].set_button(key_map[e.key], True)
             elif e.type == pygame.KEYUP:
                 if e.key in key_map:
                     bus.controllers[0].set_button(key_map[e.key], False)
 
-        # Run emulation for one frame
-        cycles_this_frame = 0
-        while cycles_this_frame < 29780:
-            instr_cycles = cpu.clock()
-            bus.apu.clock_n(instr_cycles)
-            total_cpu_cycles += instr_cycles
-            cycles_this_frame += instr_cycles
-
-            if bus.ppu.nmi:
-                bus.ppu.nmi = False
-                nmi_cycles = cpu.nmi()
-                bus.apu.clock_n(nmi_cycles)
-                total_cpu_cycles += nmi_cycles
-                cycles_this_frame += nmi_cycles
-            
-            if bus.cartridge.mapper.irq_active:
-                bus.cartridge.mapper.irq_active = False # Manual clear to prevent deadlock
-                irq_cycles = cpu.irq()
-                bus.apu.clock_n(irq_cycles)
-                total_cpu_cycles += irq_cycles
-                cycles_this_frame += irq_cycles
-            
-            if bus.apu.frame_irq_active:
-                # Frame IRQ does NOT clear itself automatically (cleared on read $4015)
-                # But to avoid immediate re-trigger in this loop, we handle it once
-                irq_cycles = cpu.irq()
-                bus.apu.clock_n(irq_cycles)
-                total_cpu_cycles += irq_cycles
-                cycles_this_frame += irq_cycles
-
-            if bus.apu.dmc_irq_active:
-                # DMC IRQ is cleared on read $4015 or write $4010
-                irq_cycles = cpu.irq()
-                bus.apu.clock_n(irq_cycles)
-                total_cpu_cycles += irq_cycles
-                cycles_this_frame += irq_cycles
-
-            bus.ppu.run_to(total_cpu_cycles * 3)
+        # High-performance Cython frame execution
+        bus.run_frame(cpu)
 
         # Audio Output
         if audio_enabled:
             audio_data = np.zeros(2048, dtype=np.float32)
             num_samples = bus.apu.flush_audio(audio_data)
             if num_samples > 0:
-                # Normalize to 16-bit signed for standard Pygame sound
-                audio_int = (audio_data[:num_samples] * 32767).astype(np.int16)
-                if audio_channels == 2:
-                    audio_int = np.repeat(audio_int[:, np.newaxis], 2, axis=1)
-                sound_chunk = pygame.sndarray.make_sound(audio_int)
+                audio_accumulator = np.append(audio_accumulator, audio_data[:num_samples])
                 
-                # Audio Sync: Wait if a chunk is already queued to prevent overflow/crackling
-                channel = pygame.mixer.Channel(0)
-                if not channel.get_busy():
-                    # If channel is idle, start it with a dummy sound or the first chunk
-                    # but usually, queue() starts it. We'll ensure it's playing.
-                    pass 
+                # Push in batches of 2048 samples (~46ms) for OS stability
+                if len(audio_accumulator) >= 2048:
+                    chunk_data = audio_accumulator[:2048]
+                    audio_accumulator = audio_accumulator[2048:]
+                    
+                    # Normalize to 16-bit signed
+                    audio_int = (chunk_data * 32767).astype(np.int16)
+                    if audio_channels == 2:
+                        audio_int = np.repeat(audio_int[:, np.newaxis], 2, axis=1)
+                    
+                    sound_chunk = pygame.sndarray.make_sound(audio_int)
+                    channel = pygame.mixer.Channel(0)
+                    
+                    # Synchronize: Wait if the queue is full
+                    wait_start = time.perf_counter()
+                    while channel.get_queue():
+                        time.sleep(0.001) # Yield to audio thread
+                        if time.perf_counter() - wait_start > 0.1: # 100ms timeout
+                            break
 
-                wait_start = pygame.time.get_ticks()
-                while channel.get_queue():
-                    pygame.time.wait(1)
-                    if pygame.time.get_ticks() - wait_start > 100: # 100ms safety timeout
-                        break
-                
-                if not channel.get_busy():
-                    channel.play(sound_chunk)
-                else:
-                    channel.queue(sound_chunk)
+                    if not channel.get_busy():
+                        channel.play(sound_chunk)
+                    else:
+                        channel.queue(sound_chunk)
             
         # Render main window
         now = pygame.time.get_ticks()
@@ -204,7 +171,7 @@ def main():
         draw_ppu_screen(bus, ppu_screen_rect, screen)
         pygame.display.flip()
 
-        # Render debug window (update every 10 frames to avoid flicker)
+        # Render debug window
         if debug_mode and debug_window and frame_count % 10 == 0:
             debug_surf.fill((0, 0, 0))
             draw_memory_view(bus, dbg_memory_rect, 0x0000, debug_surf, font)
@@ -221,11 +188,11 @@ def main():
             debug_tex.draw()
             debug_renderer.present()
 
-        if not audio_enabled:
-            clock.tick(60)
+        if not audio_enabled: clock.tick(60)
         frame_count += 1
 
     close_debug_window()
+    if bus.cartridge: bus.cartridge.save_sram()
     pygame.quit()
 
 if __name__ == '__main__':

@@ -1,9 +1,11 @@
 # cython: language_level=3, boundscheck=False, wraparound=False
+import os
 from .rom import Rom
 from .mapper cimport Mapper, Mapper000, Mapper001, Mapper002, Mapper003, Mapper004
 
 cdef class Cartridge:
     def __init__(self, str rom_path=None):
+        self.rom_path = rom_path
         if rom_path is not None:
             self.rom = Rom(rom_path)
             # make deep copy for reset
@@ -28,6 +30,8 @@ cdef class Cartridge:
                 self.mapper = Mapper004(self.rom.num_prg_banks, self.rom.num_chr_banks, self.rom.mirroring)
             else:
                 self.mapper = Mapper000(self.rom.num_prg_banks, self.rom.num_chr_banks, self.rom.mirroring)
+            
+            self.load_sram()
         else:
             self.rom = None
             self.prg_memory = bytearray(65536)
@@ -57,11 +61,44 @@ cdef class Cartridge:
         cdef int mapped_addr = self.mapper.map_ppu_read_addr(addr)
         if mapped_addr != -1:
             return self.chr_memory[mapped_addr]
-        return 0
+        return -1 # Correctly return -1 for unmapped PPU addresses
 
     cpdef int ppu_write(self, int addr, int data):
         cdef int mapped_addr = self.mapper.map_ppu_write_addr(addr, data)
         if mapped_addr != -1:
             self.chr_memory[mapped_addr] = data
             return data
-        return 0
+        return -1 # Correctly return -1 for unmapped PPU addresses
+
+    cpdef str get_sram_path(self):
+        if self.rom_path is None:
+            return None
+        return os.path.splitext(self.rom_path)[0] + ".sav"
+
+    cpdef void load_sram(self):
+        if self.rom is None or not self.rom.has_other_persistent_memory:
+            return
+        
+        path = self.get_sram_path()
+        if path and os.path.exists(path):
+            try:
+                with open(path, 'rb') as f:
+                    data = f.read(8192)
+                    for i in range(len(data)):
+                        self.prg_ram[i] = data[i]
+                print(f"Loaded SRAM from {path}")
+            except Exception as e:
+                print(f"Error loading SRAM: {e}")
+
+    cpdef void save_sram(self):
+        if self.rom is None or not self.rom.has_other_persistent_memory:
+            return
+        
+        path = self.get_sram_path()
+        if path:
+            try:
+                with open(path, 'wb') as f:
+                    f.write(self.prg_ram)
+                print(f"Saved SRAM to {path}")
+            except Exception as e:
+                print(f"Error saving SRAM: {e}")
