@@ -1,6 +1,38 @@
-.vscode
-venv
-**/__pycache__
-build/
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
 *.so
+*.pyd
+*.dylib
+*.dll
+*.a
+*.lib
+*.obj
+*.o
+
+# Cython generated C files
 pytoynes/*.c
+
+# Distribution / build artifacts
+build/
+dist/
+*.egg-info/
+
+# Virtual environment
+venv/
+.venv/
+env/
+
+# IDEs
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

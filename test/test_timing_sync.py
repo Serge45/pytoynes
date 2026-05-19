@@ -16,14 +16,19 @@ class TestTimingSync(unittest.TestCase):
         # Initial state
         self.bus.apu.total_cycles = 0
         self.bus.ppu.total_cycles = 0
+        self.bus.ppu.cycle = 0
+        self.bus.ppu.scanline = 0
         
         # Run one instruction
         # We'll use a direct clock() call to simulate CPU work
         instr_cycles = self.cpu.clock()
         self.bus.apu.clock_n(instr_cycles)
-        self.bus.ppu.run_to(self.bus.apu.total_cycles * 3)
+        target = self.bus.apu.total_cycles * 3
+        print(f"DEBUG: APU cycles: {self.bus.apu.total_cycles}, Target PPU: {target}")
+        self.bus.ppu.run_to(target)
+        print(f"DEBUG: PPU cycles after run_to: {self.bus.ppu.total_cycles}")
         
-        self.assertEqual(self.bus.ppu.total_cycles, self.bus.apu.total_cycles * 3)
+        self.assertEqual(self.bus.ppu.total_cycles, target)
         self.assertEqual(self.bus.apu.total_cycles, instr_cycles)
 
     def test_run_frame_cycle_limit(self):

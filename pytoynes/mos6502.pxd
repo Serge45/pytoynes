@@ -3,7 +3,7 @@ from .bus cimport Bus
 
 cdef class MOS6502:
     cdef public Bus bus
-    cdef public int cycle, pc, stkp, a, x, y
+    cdef public int cycle, pc, stkp, a, x, y, _extra_cycles
     cdef public int fetched, abs_addr, rel_addr, opcode
     cdef public unsigned char p
     cdef public bint jammed, _fetch_from_mem

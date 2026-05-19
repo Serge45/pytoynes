@@ -6,36 +6,58 @@ Emulates the MOS 6502 CPU and NES PPU with cycle-accurate timing. Includes a Pyg
 
 ## Features
 
-- Full 6502 CPU emulation (all official + common undocumented opcodes)
-- PPU with background and sprite rendering, scrolling, sprite-0 hit detection
-- Mapper 000 (NROM) support
-- Controller input (keyboard-mapped)
-- Debug view with live register/memory/pattern table display
-- Cython extensions for 3x speedup over pure Python
+- **Full 6502 CPU Emulation**: Support for all official and common undocumented opcodes.
+- **PPU (Picture Processing Unit)**: Background and sprite rendering, scrolling, and sprite-0 hit detection.
+- **Multiple Mappers Support**: 
+    - **Mapper 000 (NROM)**: Standard early cartridges.
+    - **Mapper 001 (MMC1)**: Advanced switching used in *The Legend of Zelda*, *Metroid*.
+    - **Mapper 002 (UNROM)**: PRG switching used in *Contra*, *Castlevania*.
+    - **Mapper 003 (CNROM)**: CHR switching used in *Gradius*.
+    - **Mapper 004 (MMC3)**: IRQ counter and fine-grained switching used in *Super Mario Bros. 3*, *Kirby's Adventure*.
+- **Hardware Interrupts**: Support for NMI (VBlank) and Mapper-generated IRQs.
+- **Dynamic Mirroring**: Support for Horizontal, Vertical, and One-Screen mirroring modes.
+- **Controller Input**: Keyboard-mapped NES controller.
+- **Debug View**: Live register, memory, and pattern table visualization.
+- **Cross-Platform**: Runs on Windows, macOS, and Linux.
 
 ## Requirements
 
 - Python 3.10+
 - Pygame
 - NumPy
-- Cython (optional, for compiled extensions)
-- A C compiler (gcc/clang, required for Cython build)
+- Cython (required for compiled extensions)
+- A C compiler (GCC, Clang, or MSVC)
 
 ## Setup
 
-```bash
-python -m venv venv
-source venv/bin/activate
-pip install pygame numpy cython
-```
+1. **Clone the repository**:
+   ```bash
+   git clone https://github.com/Serge45/pytoynes.git
+   cd pytoynes
+   ```
 
-### Build Cython Extensions (recommended)
+2. **Create a virtual environment**:
+   ```bash
+   python -m venv venv
+   source venv/bin/activate  # macOS/Linux
+   # OR
+   venv\Scripts\activate     # Windows
+   ```
+
+3. **Install dependencies**:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+### Build Cython Extensions (Recommended)
+
+Building the extensions is required for full-speed emulation (60+ FPS).
 
 ```bash
 python setup.py build_ext --inplace
 ```
 
-Without the Cython build, the emulator runs in pure Python at ~40 FPS. With Cython, it reaches ~120 FPS.
+*Note: Pre-compiled binaries are intentionally excluded from the repository to ensure cross-platform compatibility. You must build them locally for your specific architecture (e.g., x86_64, ARM64).*
 
 ## Usage
 
@@ -65,36 +87,6 @@ python app.py /path/to/rom.nes
 ```bash
 python -m unittest discover test
 ```
-
-Tests validate CPU instruction correctness against the `nestest.nes` reference log (5000+ instructions compared cycle-by-cycle).
-
-## Project Structure
-
-```
-app.py                Main loop: emulation + Pygame rendering
-setup.py              Cython build configuration
-
-pytoynes/
-  mos6502.py          MOS 6502 CPU (pure Python fallback)
-  mos6502.pyx/.pxd    Cython-compiled CPU
-  bus.py              System bus (pure Python fallback)
-  bus.pyx/.pxd        Cython-compiled bus
-  ppu.py              PPU (pure Python fallback)
-  ppu.pyx/.pxd        Cython-compiled PPU
-  cartridge.py        iNES ROM loader
-  rom.py              iNES file parser
-  mapper.py           Mapper base + Mapper000 (NROM)
-  controller.py       NES controller (shift register)
-  ui/memoryview.py    Debug overlay rendering
-
-test/
-  test_cpu.py         CPU instruction unit tests
-  test_rom.py         ROM loading + nestest integration tests
-```
-
-## Mapper Support
-
-Currently only Mapper 000 (NROM) is implemented. This covers many early NES titles including Donkey Kong, Ice Climber, and Balloon Fight. New mappers can be added by subclassing `Mapper` in `mapper.py`.
 
 ## License
 

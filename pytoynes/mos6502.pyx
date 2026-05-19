@@ -1,6 +1,6 @@
 # cython: language_level=3, boundscheck=False, wraparound=False
-from enum import IntEnum
 from .bus cimport Bus
+from enum import IntEnum
 
 class Status(IntEnum):
     C = 1
@@ -11,7 +11,6 @@ class Status(IntEnum):
     U = 1 << 5
     V = 1 << 6
     N = 1 << 7
-
 
 cdef class MOS6502:
     def __init__(self):
@@ -30,14 +29,13 @@ cdef class MOS6502:
         self.jammed = False
         self.on_opcode_loaded = None
         self._fetch_from_mem = True
+        self._extra_cycles = 0
 
-        # Optimized opcode dispatch table
         self.opcode_table = [None] * 256
         self._init_opcode_table()
         print(f'{len([x for x in self.opcode_table if x is not None])} instructions were implemented')
 
     def _init_opcode_table(self):
-        # (Name, Compute, Address, Cycles)
         lookup = {
             0x69: ("ADC", self._comp_adc, self._addr_imm, 2),
             0x65: ("ADC", self._comp_adc, self._addr_zp0, 3),
@@ -329,10 +327,11 @@ cdef class MOS6502:
 
         name, comp, addr, cycles = entry
         self._fetch_from_mem = True
+        self._extra_cycles = 0
         extra1 = addr()
         extra2 = comp()
 
-        total_cycles = cycles + (extra1 & extra2)
+        total_cycles = cycles + (extra1 & extra2) + self._extra_cycles
         return total_cycles
 
     cdef int fetch(self):
@@ -355,25 +354,19 @@ cdef class MOS6502:
         self.abs_addr = 0
         self.fetched = 0
         self.cycle = 0
+        self._extra_cycles = 0
         self.jammed = False
 
     cdef int _interupt_if(self, bint cond, int dst_addr, int num_cycles):
-        cdef int lo, hi, p_to_push
+        cdef int p_to_push, lo, hi
         if cond is True:
-            # Push PC
-            self._push_to_stack((self.pc >> 8) & 0xFF)
-            self._push_to_stack(self.pc & 0xFF)
-            
-            # Status to push: B=0, U=1
             p_to_push = self.all_status_as_int()
             p_to_push &= ~Status.B
             p_to_push |= Status.U
+            self._push_to_stack((self.pc >> 8) & 0xFF)
+            self._push_to_stack(self.pc & 0xFF)
             self._push_to_stack(p_to_push)
-            
-            # Set Interrupt Disable flag
             self._set_status(Status.I, True)
-            
-            # Jump to vector
             lo = self.bus.read(dst_addr)
             hi = self.bus.read(dst_addr + 1)
             self.pc = (hi << 8) | lo
@@ -392,14 +385,14 @@ cdef class MOS6502:
         return self._interupt_if(not (self.p & Status.I), 0xFFFE, 7)
 
     cpdef int nmi(self):
-        return self._interupt_if(True, 0xFFFA, 8)
+        return self._interupt_if(True, 0xFFFA, 7)
 
     cdef int _branch_if(self, bint cond):
         if cond is True:
-            self.cycle += 1
+            self._extra_cycles += 1
             self.abs_addr = (self.pc + self.rel_addr) & 0xFFFF
             if (self.abs_addr & 0xFF00) != (self.pc & 0xFF00):
-                self.cycle += 1
+                self._extra_cycles += 1
             self.pc = self.abs_addr
         return 0
 
@@ -435,36 +428,6 @@ cdef class MOS6502:
         self.a = added & 0x00FF
         return 1
 
-    cdef int _comp_dcp(self):
-        self._comp_dec()
-        self._comp_cmp()
-        return 0
-
-    cdef int _comp_isc(self):
-        self._comp_inc()
-        self._comp_sbc()
-        return 0
-
-    cdef int _comp_slo(self):
-        self._comp_asl()
-        self._comp_ora()
-        return 0
-
-    cdef int _comp_rla(self):
-        self._comp_rol()
-        self._comp_and()
-        return 0
-
-    cdef int _comp_sre(self):
-        self._comp_lsr()
-        self._comp_eor()
-        return 0
-
-    cdef int _comp_rra(self):
-        self._comp_ror()
-        self._comp_adc()
-        return 0
-
     cdef int _comp_and(self):
         self.fetch()
         self.a &= self.fetched
@@ -485,14 +448,9 @@ cdef class MOS6502:
             self.bus.write(self.abs_addr, new_val & 0x00FF)
         return 0
 
-    cdef int _comp_bcc(self):
-        return self._branch_if(not (self.p & Status.C))
-
-    cdef int _comp_bcs(self):
-        return self._branch_if(bool(self.p & Status.C))
-
-    cdef int _comp_beq(self):
-        return self._branch_if(bool(self.p & Status.Z))
+    cdef int _comp_bcc(self): return self._branch_if(not (self.p & Status.C))
+    cdef int _comp_bcs(self): return self._branch_if(bool(self.p & Status.C))
+    cdef int _comp_beq(self): return self._branch_if(bool(self.p & Status.Z))
 
     cdef int _comp_bit(self):
         cdef int new_val
@@ -503,17 +461,11 @@ cdef class MOS6502:
         self._set_status(Status.V, self.fetched & (1 << 6))
         return 0
 
-    cdef int _comp_bmi(self):
-        return self._branch_if(bool(self.p & Status.N))
-
-    cdef int _comp_bne(self):
-        return self._branch_if(not (self.p & Status.Z))
-
-    cdef int _comp_bpl(self):
-        return self._branch_if(not (self.p & Status.N))
+    cdef int _comp_bmi(self): return self._branch_if(bool(self.p & Status.N))
+    cdef int _comp_bne(self): return self._branch_if(not (self.p & Status.Z))
+    cdef int _comp_bpl(self): return self._branch_if(not (self.p & Status.N))
 
     cdef int _comp_brk(self):
-        cdef int lo, hi
         self.pc += 1
         self._push_to_stack((self.pc >> 8) & 0x00FF)
         self._push_to_stack(self.pc & 0x00FF)
@@ -525,27 +477,13 @@ cdef class MOS6502:
         self.pc = (hi << 8) | lo
         return 0
 
-    cdef int _comp_bvc(self):
-        return self._branch_if(not (self.p & Status.V))
+    cdef int _comp_bvc(self): return self._branch_if(not (self.p & Status.V))
+    cdef int _comp_bvs(self): return self._branch_if(bool(self.p & Status.V))
 
-    cdef int _comp_bvs(self):
-        return self._branch_if(bool(self.p & Status.V))
-
-    cdef int _comp_clc(self):
-        self._set_status(Status.C, False)
-        return 0
-
-    cdef int _comp_cld(self):
-        self._set_status(Status.D, False)
-        return 0
-
-    cdef int _comp_cli(self):
-        self._set_status(Status.I, False)
-        return 0
-
-    cdef int _comp_clv(self):
-        self._set_status(Status.V, False)
-        return 0
+    cdef int _comp_clc(self): self._set_status(Status.C, False); return 0
+    cdef int _comp_cld(self): self._set_status(Status.D, False); return 0
+    cdef int _comp_cli(self): self._set_status(Status.I, False); return 0
+    cdef int _comp_clv(self): self._set_status(Status.V, False); return 0
 
     cdef int _comp_cmp(self):
         cdef int val, p
@@ -747,42 +685,43 @@ cdef class MOS6502:
         return 0
 
     cdef int _comp_rol(self):
-        cdef int old_carry_flag
+        cdef int old_carry_flag, new_val
         self.fetch()
         old_carry_flag = (1 if (self.p & Status.C) else 0)
-        self.fetched = (self.fetched << 1) | (old_carry_flag)
-        self._set_status(Status.C, (self.fetched & 0xFF00) > 0)
-        self._set_status(Status.Z, (self.fetched & 0xFF) == 0)
-        self._set_status(Status.N, (self.fetched & 0x80) > 0)
+        new_val = (self.fetched << 1) | (old_carry_flag)
+        self._set_status(Status.C, (new_val & 0xFF00) > 0)
+        self._set_status(Status.Z, (new_val & 0xFF) == 0)
+        self._set_status(Status.N, (new_val & 0x80) > 0)
         if not self._fetch_from_mem:
-            self.a = (self.fetched & 0xFF)
+            self.a = (new_val & 0xFF)
         else:
-            self.bus.write(self.abs_addr, (self.fetched & 0xFF))
+            self.bus.write(self.abs_addr, (new_val & 0xFF))
         return 0
 
     cdef int _comp_ror(self):
-        cdef int old_carry_flag, old_val
+        cdef int old_carry_flag, old_val, new_val
         self.fetch()
         old_carry_flag = (1 if (self.p & Status.C) else 0)
         old_val = self.fetched
-        self.fetched = ((self.fetched >> 1) & 0xFF) | (int(old_carry_flag) << 7)
+        new_val = ((self.fetched >> 1) & 0xFF) | (int(old_carry_flag) << 7)
         self._set_status(Status.C, (old_val & 0x01) > 0)
-        self._set_status(Status.Z, (self.fetched & 0xFF) == 0)
-        self._set_status(Status.N, (self.fetched & 0x80) > 0)
+        self._set_status(Status.Z, (new_val & 0xFF) == 0)
+        self._set_status(Status.N, (new_val & 0x80) > 0)
         if not self._fetch_from_mem:
-            self.a = self.fetched
+            self.a = new_val
         else:
-            self.bus.write(self.abs_addr, self.fetched)
+            self.bus.write(self.abs_addr, new_val)
         return 0
 
     cdef int _comp_rti(self):
-        cdef int status_int
+        cdef int status_int, lo, hi
         status_int = self._pop_from_stack()
         status_int &= ~Status.B
         status_int |= Status.U
         self.restore_all_status_from_int(status_int)
-        self.pc = self._pop_from_stack()
-        self.pc |= (self._pop_from_stack() << 8)
+        lo = self._pop_from_stack()
+        hi = self._pop_from_stack()
+        self.pc = (hi << 8) | lo
         return 0
 
     cdef int _comp_rts(self):
@@ -859,6 +798,36 @@ cdef class MOS6502:
         cdef int m
         m = self.x & self.a
         self.bus.write(self.abs_addr, m)
+        return 0
+
+    cdef int _comp_dcp(self):
+        self._comp_dec()
+        self._comp_cmp()
+        return 0
+
+    cdef int _comp_isc(self):
+        self._comp_inc()
+        self._comp_sbc()
+        return 0
+
+    cdef int _comp_slo(self):
+        self._comp_asl()
+        self._comp_ora()
+        return 0
+
+    cdef int _comp_rla(self):
+        self._comp_rol()
+        self._comp_and()
+        return 0
+
+    cdef int _comp_sre(self):
+        self._comp_lsr()
+        self._comp_eor()
+        return 0
+
+    cdef int _comp_rra(self):
+        self._comp_ror()
+        self._comp_adc()
         return 0
 
     cdef int _addr_imp(self):

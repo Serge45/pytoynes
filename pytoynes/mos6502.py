@@ -325,11 +325,13 @@ class MOS6502:
             
         name, comp, addr, cycles = entry
         self._fetch_from_mem = True
+        self._extra_cycles = 0
         extra1 = addr()
         extra2 = comp()
 
-        total_cycles = cycles + extra1 + extra2
+        total_cycles = cycles + (extra1 & extra2) + self._extra_cycles
         return total_cycles
+
     def fetch(self):
         if self._fetch_from_mem:
             self.fetched = self.bus.read(self.abs_addr)
@@ -388,12 +390,11 @@ class MOS6502:
 
     def _branch_if(self, cond: bool):
         if cond is True:
-            extra_cycles = 1
+            self._extra_cycles += 1
             self.abs_addr = (self.pc + self.rel_addr) & 0xFFFF
             if (self.abs_addr & 0xFF00) != (self.pc & 0xFF00):
-                extra_cycles += 1
+                self._extra_cycles += 1
             self.pc = self.abs_addr
-            return extra_cycles
         return 0
 
     def _get_status(self, flag: Status):
@@ -442,28 +443,19 @@ class MOS6502:
         return 0
 
     def _comp_rla(self):
-        self._comp_rla_logic()
-        return 0
-
-    def _comp_rla_logic(self):
         self._comp_rol()
         self._comp_and()
+        return 0
 
     def _comp_sre(self):
-        self._comp_sre_logic()
-        return 0
-
-    def _comp_sre_logic(self):
         self._comp_lsr()
         self._comp_eor()
-
-    def _comp_rra(self):
-        self._comp_rra_logic()
         return 0
 
-    def _comp_rra_logic(self):
+    def _comp_rra(self):
         self._comp_ror()
         self._comp_adc()
+        return 0
 
     def _comp_and(self):
         self.fetch()
@@ -682,24 +674,24 @@ class MOS6502:
     def _comp_rol(self):
         self.fetch()
         old_carry_flag = (1 if (self.p & Status.C) else 0)
-        self.fetched = (self.fetched << 1) | (old_carry_flag)
-        self._set_status(Status.C, (self.fetched & 0xFF00) > 0)
-        self._set_status(Status.Z, (self.fetched & 0xFF) == 0)
-        self._set_status(Status.N, (self.fetched & 0x80) > 0)
-        if not self._fetch_from_mem: self.a = (self.fetched & 0xFF)
-        else: self.bus.write(self.abs_addr, (self.fetched & 0xFF))
+        new_val = (self.fetched << 1) | (old_carry_flag)
+        self._set_status(Status.C, (new_val & 0xFF00) > 0)
+        self._set_status(Status.Z, (new_val & 0xFF) == 0)
+        self._set_status(Status.N, (new_val & 0x80) > 0)
+        if not self._fetch_from_mem: self.a = (new_val & 0xFF)
+        else: self.bus.write(self.abs_addr, (new_val & 0xFF))
         return 0
 
     def _comp_ror(self):
         self.fetch()
         old_carry_flag = (1 if (self.p & Status.C) else 0)
         old_val = self.fetched
-        self.fetched = ((self.fetched >> 1) & 0xFF) | (int(old_carry_flag) << 7)
+        new_val = ((self.fetched >> 1) & 0xFF) | (int(old_carry_flag) << 7)
         self._set_status(Status.C, (old_val & 0x01) > 0)
-        self._set_status(Status.Z, (self.fetched & 0xFF) == 0)
-        self._set_status(Status.N, (self.fetched & 0x80) > 0)
-        if not self._fetch_from_mem: self.a = self.fetched
-        else: self.bus.write(self.abs_addr, self.fetched)
+        self._set_status(Status.Z, (new_val & 0xFF) == 0)
+        self._set_status(Status.N, (new_val & 0x80) > 0)
+        if not self._fetch_from_mem: self.a = new_val
+        else: self.bus.write(self.abs_addr, new_val)
         return 0
 
     def _comp_rti(self):
@@ -707,8 +699,9 @@ class MOS6502:
         status_int &= ~Status.B
         status_int |= Status.U
         self.restore_all_status_from_int(status_int)
-        self.pc = self._pop_from_stack()
-        self.pc |= (self._pop_from_stack() << 8)
+        lo = self._pop_from_stack()
+        hi = self._pop_from_stack()
+        self.pc = (hi << 8) | lo
         return 0
 
     def _comp_rts(self):
